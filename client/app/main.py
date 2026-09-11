@@ -2,6 +2,7 @@ import cv2
 
 from app.camera.rtsp import RTSPCamera
 from app.config.settings import settings
+from app.gui.line_config import LineConfigurator
 
 from app.detection.detector import (
     PersonDetector
@@ -41,14 +42,26 @@ def main():
     # LINEA DE PRUEBA
     # ==========================================
 
-    line_p1 = (640, 100)
-    line_p2 = (640, 650)
+    from app.config.camera_config import load_camera_config
+    
+    config = load_camera_config()
+
+    line_p1 = (
+        config["line"]["x1"],
+        config["line"]["y1"]
+    )
+
+    line_p2 = (
+        config["line"]["x2"],
+        config["line"]["y2"]
+    )
 
     counter = LineCounter(
         point1=line_p1,
         point2=line_p2,
-        in_side=1
+        in_side=config["in_side"]
     )
+    
 
     try:
 

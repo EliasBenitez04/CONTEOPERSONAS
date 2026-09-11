@@ -48,6 +48,9 @@ class PersonDetector:
         ):
             x1, y1, x2, y2 = box
 
+            point_x = int((x1 + x2) / 2)
+            point_y = int(y2)
+
             persons.append({
                 "id": track_id,
                 "x1": int(x1),
@@ -56,11 +59,9 @@ class PersonDetector:
                 "y2": int(y2),
                 "confidence": float(confidence),
 
-                # Punto que usamos para contar:
-                # centro inferior de la persona
                 "point": (
-                    int((y1 + y2) / 2),
-                    int(x2)
+                    point_x,
+                    point_y
                 )
             })
 
