@@ -2,35 +2,15 @@ import cv2
 
 from app.camera.rtsp import RTSPCamera
 from app.config.settings import settings
+from app.config.camera_config import load_camera_config
+from app.gui.line_config import LineConfigurator
+from app.detection.detector import PersonDetector
+from app.detection.counter import LineCounter
+from app.database.database import LocalDatabase, AsyncEventWriter
+from app.database.models import CountEvent
 
-from app.config.camera_config import (
-    load_camera_config
-)
 
-from app.gui.line_config import (
-    LineConfigurator
-)
-
-from app.detection.detector import (
-    PersonDetector
-)
-
-from app.detection.counter import (
-    LineCounter
-)
-
-from app.database.database import (
-    LocalDatabase,
-    AsyncEventWriter
-)
-
-from app.database.models import (
-    CountEvent
-)
-
-def get_line(
-    config
-):
+def get_line(config):
 
     p1 = (
         config["line"]["x1"],
@@ -43,6 +23,137 @@ def get_line(
     )
 
     return p1, p2
+
+
+def draw_panel(frame, session_in, session_out, today_in, today_out):
+
+    overlay = frame.copy()
+
+    cv2.rectangle(
+        overlay,
+        (12, 12),
+        (390, 205),
+        (20, 20, 20),
+        -1
+    )
+
+    cv2.addWeighted(
+        overlay,
+        0.72,
+        frame,
+        0.28,
+        0,
+        frame
+    )
+
+    cv2.putText(
+        frame,
+        "CONTEO - SESION ACTUAL",
+        (28, 42),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.75,
+        (255, 255, 255),
+        2
+    )
+
+    cv2.putText(
+        frame,
+        f"ENTRADAS: {session_in}",
+        (28, 78),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.72,
+        (0, 255, 0),
+        2
+    )
+
+    cv2.putText(
+        frame,
+        f"SALIDAS:  {session_out}",
+        (28, 112),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.72,
+        (0, 80, 255),
+        2
+    )
+
+    inside = max(0, session_in - session_out)
+
+    cv2.putText(
+        frame,
+        f"DENTRO:   {inside}",
+        (28, 146),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.72,
+        (0, 255, 255),
+        2
+    )
+
+    cv2.putText(
+        frame,
+        f"HOY -> IN {today_in} | OUT {today_out}",
+        (28, 181),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.60,
+        (210, 210, 210),
+        2
+    )
+
+
+def draw_direction_labels(frame, counter, line_p1, line_p2):
+
+    x1, y1 = line_p1
+    x2, y2 = line_p2
+
+    mid_x = int((x1 + x2) / 2)
+    mid_y = int((y1 + y2) / 2)
+
+    dx = x2 - x1
+    dy = y2 - y1
+
+    length = max(1.0, (dx * dx + dy * dy) ** 0.5)
+
+    # Normal positiva: coincide con signed_distance > 0.
+    nx = -dy / length
+    ny = dx / length
+
+    offset = 48
+
+    positive_pos = (
+        int(mid_x + nx * offset),
+        int(mid_y + ny * offset)
+    )
+
+    negative_pos = (
+        int(mid_x - nx * offset),
+        int(mid_y - ny * offset)
+    )
+
+    if counter.in_side == 1:
+        in_pos = positive_pos
+        out_pos = negative_pos
+    else:
+        in_pos = negative_pos
+        out_pos = positive_pos
+
+    cv2.putText(
+        frame,
+        "IN",
+        in_pos,
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.85,
+        (0, 255, 0),
+        2
+    )
+
+    cv2.putText(
+        frame,
+        "OUT",
+        out_pos,
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.85,
+        (0, 80, 255),
+        2
+    )
 
 
 def main():
@@ -62,13 +173,8 @@ def main():
         imgsz=640
     )
 
-    config = (
-        load_camera_config()
-    )
-
-    line_p1, line_p2 = (
-        get_line(config)
-    )
+    config = load_camera_config()
+    line_p1, line_p2 = get_line(config)
 
     counter = LineCounter(
         point1=line_p1,
@@ -76,56 +182,31 @@ def main():
         in_side=config["in_side"],
         margin=config["margin"]
     )
-    
-    # ==========================================
-    # BASE DE DATOS LOCAL
-    # ==========================================
-    
+
+    # IMPORTANTE:
+    # counter.entries/exits representan SOLO esta ejecucion.
+    # Los registros historicos del dia permanecen en SQLite.
     database = LocalDatabase()
-    
-    event_writer = AsyncEventWriter(
-        database
+    event_writer = AsyncEventWriter(database)
+
+    today_totals = database.get_today_totals(
+        branch_id=settings.BRANCH_ID,
+        camera_name=settings.CAMERA_NAME
     )
-    
-    today_totals = (
-        database.get_today_totals(
-            branch_id=settings.BRANCH_ID,
-            camera_name=settings.CAMERA_NAME
-        )
-    )
-    
-    counter.set_counts(
-        entries=today_totals["IN"],
-        exits=today_totals["OUT"]
-    )
-    
-    print(
-        "[DB] Conteo recuperado del dia:"
-    )
-    
-    print(
-        f"     Entradas: "
-        f"{today_totals['IN']}"
-    )
-    
-    print(
-        f"     Salidas: "
-        f"{today_totals['OUT']}"
-    )
+
+    session_base_in = today_totals["IN"]
+    session_base_out = today_totals["OUT"]
+
+    print("[DB] Historial del dia conservado:")
+    print(f"     Entradas: {session_base_in}")
+    print(f"     Salidas:  {session_base_out}")
+    print("[SESION] Contador visual iniciado en 0 / 0.")
 
     try:
 
         for frame in camera.start():
 
-            persons = (
-                detector.track(
-                    frame
-                )
-            )
-
-            # ==============================
-            # LINEA
-            # ==============================
+            persons = detector.track(frame)
 
             cv2.line(
                 frame,
@@ -135,19 +216,17 @@ def main():
                 3
             )
 
-            # ==============================
-            # PERSONAS
-            # ==============================
+            draw_direction_labels(
+                frame,
+                counter,
+                line_p1,
+                line_p2
+            )
 
             for person in persons:
 
-                track_id = (
-                    person["id"]
-                )
-
-                point = (
-                    person["point"]
-                )
+                track_id = person["id"]
+                point = person["point"]
 
                 event = counter.update(
                     track_id,
@@ -178,13 +257,7 @@ def main():
                 cv2.putText(
                     frame,
                     f"ID {track_id}",
-                    (
-                        x1,
-                        max(
-                            20,
-                            y1 - 10
-                        )
-                    ),
+                    (x1, max(20, y1 - 10)),
                     cv2.FONT_HERSHEY_SIMPLEX,
                     0.65,
                     (0, 255, 0),
@@ -194,75 +267,35 @@ def main():
                 if event:
 
                     print(
-                        f"[CONTEO] "
-                        f"ID {track_id}: "
-                        f"{event}"
+                        f"[CONTEO] ID {track_id}: {event}"
                     )
 
-                    count_event = (
-                        CountEvent.create(
-                            branch_id=(
-                                settings.BRANCH_ID
-                            ),
-                            camera_name=(
-                                settings.CAMERA_NAME
-                            ),
-                            track_id=track_id,
-                            event_type=event
-                        )
+                    count_event = CountEvent.create(
+                        branch_id=settings.BRANCH_ID,
+                        camera_name=settings.CAMERA_NAME,
+                        track_id=track_id,
+                        event_type=event
                     )
 
-                    event_writer.enqueue(
-                        count_event
-                    )
+                    event_writer.enqueue(count_event)
 
-            # ==============================
-            # CONTADORES
-            # ==============================
+            today_in = session_base_in + counter.entries
+            today_out = session_base_out + counter.exits
 
-            cv2.putText(
+            draw_panel(
                 frame,
-                f"ENTRADAS: {counter.entries}",
-                (20, 40),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                1,
-                (0, 255, 0),
-                2
+                counter.entries,
+                counter.exits,
+                today_in,
+                today_out
             )
 
             cv2.putText(
                 frame,
-                f"SALIDAS: {counter.exits}",
-                (20, 80),
+                "C: configurar linea | Q: salir",
+                (20, max(235, frame.shape[0] - 22)),
                 cv2.FONT_HERSHEY_SIMPLEX,
-                1,
-                (0, 0, 255),
-                2
-            )
-            
-            people_inside = max(
-                0,
-                counter.entries
-                -
-                counter.exits
-            )
-            
-            cv2.putText(
-                frame,
-                f"DENTRO: {people_inside}",
-                (20, 120),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                1,
-                (255, 255, 0),
-                2
-            )
-
-            cv2.putText(
-                frame,
-                "C = configurar linea",
-                (20, 160),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.7,
+                0.62,
                 (255, 255, 255),
                 2
             )
@@ -272,43 +305,20 @@ def main():
                 frame
             )
 
-            key = (
-                cv2.waitKey(1)
-                & 0xFF
-            )
+            key = cv2.waitKey(1) & 0xFF
 
             if key == ord("q"):
-
                 break
-
-            # ==============================
-            # CONFIGURAR LINEA
-            # ==============================
 
             elif key == ord("c"):
 
-                configurator = (
-                    LineConfigurator()
-                )
-
-                new_config = (
-                    configurator.run(
-                        frame
-                    )
-                )
+                configurator = LineConfigurator()
+                new_config = configurator.run(frame)
 
                 if new_config:
 
-                    config = (
-                        new_config
-                    )
-
-                    (
-                        line_p1,
-                        line_p2
-                    ) = get_line(
-                        config
-                    )
+                    config = new_config
+                    line_p1, line_p2 = get_line(config)
 
                     counter.set_line(
                         line_p1,
@@ -320,25 +330,19 @@ def main():
                     )
 
                     print(
-                        "[CONFIG] Nueva linea "
-                        "aplicada."
+                        "[CONFIG] Nueva linea y direccion aplicadas."
                     )
 
     except KeyboardInterrupt:
 
-        print(
-            "\n[SISTEMA] Finalizando."
-        )
+        print("\n[SISTEMA] Finalizando.")
 
     finally:
 
         camera.stop()
-    
         event_writer.close()
-    
         cv2.destroyAllWindows()
 
 
 if __name__ == "__main__":
-
     main()
