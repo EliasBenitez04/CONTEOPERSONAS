@@ -12,7 +12,8 @@ DEFAULT_CONFIG = {
         "x2": 640,
         "y2": 650
     },
-    "in_side": 1
+    "in_side": 1,
+    "margin": 18
 }
 
 

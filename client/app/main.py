@@ -19,6 +19,14 @@ from app.detection.counter import (
     LineCounter
 )
 
+from app.database.database import (
+    LocalDatabase,
+    AsyncEventWriter
+)
+
+from app.database.models import (
+    CountEvent
+)
 
 def get_line(
     config
@@ -67,6 +75,42 @@ def main():
         point2=line_p2,
         in_side=config["in_side"],
         margin=config["margin"]
+    )
+    
+    # ==========================================
+    # BASE DE DATOS LOCAL
+    # ==========================================
+    
+    database = LocalDatabase()
+    
+    event_writer = AsyncEventWriter(
+        database
+    )
+    
+    today_totals = (
+        database.get_today_totals(
+            branch_id=settings.BRANCH_ID,
+            camera_name=settings.CAMERA_NAME
+        )
+    )
+    
+    counter.set_counts(
+        entries=today_totals["IN"],
+        exits=today_totals["OUT"]
+    )
+    
+    print(
+        "[DB] Conteo recuperado del dia:"
+    )
+    
+    print(
+        f"     Entradas: "
+        f"{today_totals['IN']}"
+    )
+    
+    print(
+        f"     Salidas: "
+        f"{today_totals['OUT']}"
     )
 
     try:
@@ -155,6 +199,23 @@ def main():
                         f"{event}"
                     )
 
+                    count_event = (
+                        CountEvent.create(
+                            branch_id=(
+                                settings.BRANCH_ID
+                            ),
+                            camera_name=(
+                                settings.CAMERA_NAME
+                            ),
+                            track_id=track_id,
+                            event_type=event
+                        )
+                    )
+
+                    event_writer.enqueue(
+                        count_event
+                    )
+
             # ==============================
             # CONTADORES
             # ==============================
@@ -178,11 +239,28 @@ def main():
                 (0, 0, 255),
                 2
             )
+            
+            people_inside = max(
+                0,
+                counter.entries
+                -
+                counter.exits
+            )
+            
+            cv2.putText(
+                frame,
+                f"DENTRO: {people_inside}",
+                (20, 120),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                1,
+                (255, 255, 0),
+                2
+            )
 
             cv2.putText(
                 frame,
                 "C = configurar linea",
-                (20, 120),
+                (20, 160),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.7,
                 (255, 255, 255),
@@ -255,7 +333,9 @@ def main():
     finally:
 
         camera.stop()
-
+    
+        event_writer.close()
+    
         cv2.destroyAllWindows()
 
 
