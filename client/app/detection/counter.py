@@ -16,9 +16,9 @@ class LineCounter:
         self.in_side = 1 if in_side >= 0 else -1
         self.margin = max(4, int(margin))
 
-        # Umbral mas pequeno que confirma que el centro de la persona
-        # realmente paso al otro lado de la linea. El margen grande se
-        # conserva para rearmar el contador y evitar dobles conteos.
+        # Umbral pequeno que confirma que la persona realmente cruzo.
+        # El margen completo se usa para rearmar el contador y evitar
+        # conteos dobles por oscilaciones del tracking sobre la linea.
         self.crossing_margin = max(
             4.0,
             self.margin * 0.35
@@ -87,8 +87,8 @@ class LineCounter:
 
         state = self.states[track_id]
 
-        # No tomamos como origen un punto pegado a la linea porque
-        # pequeñas oscilaciones del bounding box pueden cambiar el signo.
+        # No usamos como origen un punto pegado a la linea porque pequenas
+        # oscilaciones del bounding box pueden cambiar el signo.
         if (
             state["origin_side"] is None
             and abs(distance) >= self.crossing_margin
@@ -98,8 +98,8 @@ class LineCounter:
         # Primer lado estable del track.
         if state["stable_side"] is None:
 
-            # Caso importante: el ID apareció cerca de la linea y ya
-            # alcanzó claramente el lado contrario. Se cuenta el cruce.
+            # Si aparecio cerca de la linea y ya llego claramente al lado
+            # contrario, el cruce se considera valido.
             if (
                 state["origin_side"] is not None
                 and raw_side != state["origin_side"]
@@ -111,8 +111,6 @@ class LineCounter:
                 state["armed"] = False
                 return event
 
-            # Si todavía no cruzó, esperamos que se aleje del centro para
-            # considerar ese lado como estable y habilitar un cruce.
             if abs(distance) >= self.margin:
                 state["stable_side"] = raw_side
                 state["origin_side"] = raw_side
@@ -120,9 +118,8 @@ class LineCounter:
 
             return None
 
-        # Después de un conteo exigimos que la persona se aleje hasta el
-        # margen completo antes de permitir un cruce de regreso. Esto evita
-        # IN/OUT repetidos por vibración del tracking sobre la línea.
+        # Despues de contar exigimos que la persona se aleje hasta el
+        # margen completo antes de permitir un cruce de regreso.
         if not state["armed"]:
 
             if (
@@ -133,12 +130,10 @@ class LineCounter:
 
             return None
 
-        # Sigue del mismo lado.
         if raw_side == state["stable_side"]:
             return None
 
-        # Ya cambió de signo, pero esperamos una separación mínima para
-        # confirmar que no fue ruido del bounding box.
+        # Cambio de signo demasiado cerca de la linea: puede ser ruido.
         if abs(distance) < self.crossing_margin:
             return None
 
@@ -173,15 +168,39 @@ class LineCounter:
         self.point2 = point2
         self.states.clear()
 
-    def set_in_side(self, in_side):
+    def set_in_side(self, in_side, swap_counts=False):
+        """
+        Cambia el lado considerado entrada.
 
-        self.in_side = 1 if in_side >= 0 else -1
+        Si swap_counts=True y la direccion realmente cambia, los conteos
+        acumulados de la sesion tambien se intercambian. Esto mantiene la
+        interfaz coherente cuando el usuario corrige IN/OUT durante el dia.
+        """
+
+        new_in_side = 1 if in_side >= 0 else -1
+        changed = new_in_side != self.in_side
+
+        if changed and swap_counts:
+            self.swap_counts()
+
+        self.in_side = new_in_side
         self.states.clear()
 
-    def invert_direction(self):
+        return changed
 
-        self.in_side *= -1
-        self.states.clear()
+    def swap_counts(self):
+
+        self.entries, self.exits = (
+            self.exits,
+            self.entries
+        )
+
+    def invert_direction(self, swap_counts=True):
+
+        return self.set_in_side(
+            -self.in_side,
+            swap_counts=swap_counts
+        )
 
     def reset_counts(self):
 
@@ -190,7 +209,7 @@ class LineCounter:
         self.states.clear()
 
     def set_counts(self, entries, exits):
-        """Compatibilidad para restauraciones manuales; no se usa al iniciar."""
+        """Compatibilidad para restauraciones manuales."""
 
         self.entries = int(entries)
         self.exits = int(exits)
