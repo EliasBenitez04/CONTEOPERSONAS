@@ -68,6 +68,16 @@ class LocalDatabase:
 
         return connection
 
+    @staticmethod
+    def _today_iso():
+
+        return (
+            datetime.now()
+            .astimezone()
+            .date()
+            .isoformat()
+        )
+
     # ==========================================
     # CREAR ESTRUCTURA
     # ==========================================
@@ -188,12 +198,7 @@ class LocalDatabase:
         camera_name: str
     ):
 
-        today = (
-            datetime.now()
-            .astimezone()
-            .date()
-            .isoformat()
-        )
+        today = self._today_iso()
 
         totals = {
             "IN": 0,
@@ -234,6 +239,64 @@ class LocalDatabase:
             ] = row["total"]
 
         return totals
+
+    # ==========================================
+    # INVERTIR IN / OUT DEL DIA
+    # ==========================================
+
+    def swap_today_event_types(
+        self,
+        branch_id: int,
+        camera_name: str
+    ):
+        """
+        Intercambia IN <-> OUT solamente para la camara y sucursal actual
+        en la fecha de hoy. No elimina ningun registro.
+
+        Los eventos modificados vuelven a synchronized=0 para permitir que
+        una futura sincronizacion replique la correccion al servidor.
+        """
+
+        today = self._today_iso()
+
+        with self.connect() as connection:
+
+            cursor = connection.execute(
+                """
+                UPDATE count_events
+
+                SET
+                    event_type = CASE event_type
+                        WHEN 'IN' THEN 'OUT'
+                        WHEN 'OUT' THEN 'IN'
+                    END,
+                    synchronized = 0,
+                    synced_at = NULL
+
+                WHERE branch_id = ?
+                AND camera_name = ?
+                AND substr(
+                    occurred_at,
+                    1,
+                    10
+                ) = ?
+                """,
+                (
+                    branch_id,
+                    camera_name,
+                    today
+                )
+            )
+
+            affected = cursor.rowcount
+            connection.commit()
+
+        print(
+            "[DB] IN/OUT del dia intercambiados: "
+            f"{affected} eventos actualizados."
+        )
+
+        return affected
 
     # ==========================================
     # EVENTOS SIN SINCRONIZAR
@@ -349,7 +412,6 @@ class AsyncEventWriter:
     ):
 
         self.database = database
-
         self.queue = Queue()
 
         self.thread = threading.Thread(
@@ -372,6 +434,11 @@ class AsyncEventWriter:
             event
         )
 
+    def flush(self):
+        """Espera hasta que todos los eventos pendientes queden guardados."""
+
+        self.queue.join()
+
     def _worker(self):
 
         while True:
@@ -381,7 +448,6 @@ class AsyncEventWriter:
             if event is None:
 
                 self.queue.task_done()
-
                 break
 
             try:
@@ -409,11 +475,11 @@ class AsyncEventWriter:
 
     def close(self):
 
-        # Todo lo colocado antes del sentinel
-        # se procesa primero.
-        self.queue.put(
-            None
-        )
+        # Primero esperamos todos los eventos reales y luego enviamos
+        # el sentinel de cierre.
+        self.flush()
+        self.queue.put(None)
+        self.queue.join()
 
         self.thread.join(
             timeout=5
