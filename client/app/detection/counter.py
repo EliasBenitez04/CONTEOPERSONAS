@@ -258,17 +258,17 @@ class LineCounter:
         self.exits = 0
 
         self.states.clear()
-        
-def set_counts(
-    self,
-    entries,
-    exits
-):
 
-    self.entries = int(
-        entries
-    )
-
-    self.exits = int(
+    def set_counts(
+        self,
+        entries,
         exits
-    )
+    ):
+
+        self.entries = int(
+            entries
+        )
+
+        self.exits = int(
+            exits
+        )
