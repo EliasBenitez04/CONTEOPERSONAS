@@ -27,7 +27,6 @@ class LocalDatabase:
         self,
         database_path=DATABASE_PATH
     ):
-
         self.database_path = Path(
             database_path
         )
@@ -39,12 +38,7 @@ class LocalDatabase:
 
         self.initialize()
 
-    # ==========================================
-    # CONEXION
-    # ==========================================
-
     def connect(self):
-
         connection = sqlite3.connect(
             self.database_path,
             timeout=10
@@ -68,14 +62,8 @@ class LocalDatabase:
 
         return connection
 
-    # ==========================================
-    # CREAR ESTRUCTURA
-    # ==========================================
-
     def initialize(self):
-
         with self.connect() as connection:
-
             connection.execute(
                 """
                 CREATE TABLE IF NOT EXISTS count_events
@@ -140,17 +128,11 @@ class LocalDatabase:
             f"{self.database_path}"
         )
 
-    # ==========================================
-    # INSERTAR EVENTO
-    # ==========================================
-
     def insert_event(
         self,
         event: CountEvent
     ):
-
         with self.connect() as connection:
-
             connection.execute(
                 """
                 INSERT OR IGNORE INTO count_events
@@ -178,16 +160,11 @@ class LocalDatabase:
 
             connection.commit()
 
-    # ==========================================
-    # TOTALES DEL DIA
-    # ==========================================
-
     def get_today_totals(
         self,
         branch_id: int,
         camera_name: str
     ):
-
         today = (
             datetime.now()
             .astimezone()
@@ -201,7 +178,6 @@ class LocalDatabase:
         }
 
         with self.connect() as connection:
-
             rows = connection.execute(
                 """
                 SELECT
@@ -228,24 +204,69 @@ class LocalDatabase:
             ).fetchall()
 
         for row in rows:
-
             totals[
                 row["event_type"]
             ] = row["total"]
 
         return totals
 
-    # ==========================================
-    # EVENTOS SIN SINCRONIZAR
-    # ==========================================
+    def swap_today_event_types(
+        self,
+        branch_id: int,
+        camera_name: str
+    ):
+        today = (
+            datetime.now()
+            .astimezone()
+            .date()
+            .isoformat()
+        )
+
+        with self.connect() as connection:
+            cursor = connection.execute(
+                """
+                UPDATE count_events
+
+                SET
+                    event_type = CASE
+                        WHEN event_type = 'IN'
+                            THEN 'OUT'
+                        WHEN event_type = 'OUT'
+                            THEN 'IN'
+                        ELSE event_type
+                    END,
+                    synchronized = 0,
+                    synced_at = NULL
+
+                WHERE branch_id = ?
+                AND camera_name = ?
+                AND substr(
+                    occurred_at,
+                    1,
+                    10
+                ) = ?
+                """,
+                (
+                    branch_id,
+                    camera_name,
+                    today
+                )
+            )
+
+            connection.commit()
+
+        print(
+            "[DB] Direccion del dia invertida. "
+            f"Eventos actualizados: {cursor.rowcount}"
+        )
+
+        return cursor.rowcount
 
     def get_pending_events(
         self,
         limit=100
     ):
-
         with self.connect() as connection:
-
             rows = connection.execute(
                 """
                 SELECT *
@@ -268,15 +289,10 @@ class LocalDatabase:
             for row in rows
         ]
 
-    # ==========================================
-    # MARCAR SINCRONIZADO
-    # ==========================================
-
     def mark_as_synchronized(
         self,
         event_uuid: str
     ):
-
         synced_at = (
             datetime.now()
             .astimezone()
@@ -286,7 +302,6 @@ class LocalDatabase:
         )
 
         with self.connect() as connection:
-
             connection.execute(
                 """
                 UPDATE count_events
@@ -305,17 +320,11 @@ class LocalDatabase:
 
             connection.commit()
 
-    # ==========================================
-    # ULTIMOS EVENTOS
-    # ==========================================
-
     def get_recent_events(
         self,
         limit=20
     ):
-
         with self.connect() as connection:
-
             rows = connection.execute(
                 """
                 SELECT *
@@ -337,19 +346,13 @@ class LocalDatabase:
         ]
 
 
-# ==============================================
-# ESCRITOR ASINCRONO
-# ==============================================
-
 class AsyncEventWriter:
 
     def __init__(
         self,
         database: LocalDatabase
     ):
-
         self.database = database
-
         self.queue = Queue()
 
         self.thread = threading.Thread(
@@ -367,25 +370,19 @@ class AsyncEventWriter:
         self,
         event: CountEvent
     ):
-
         self.queue.put(
             event
         )
 
     def _worker(self):
-
         while True:
-
             event = self.queue.get()
 
             if event is None:
-
                 self.queue.task_done()
-
                 break
 
             try:
-
                 self.database.insert_event(
                     event
                 )
@@ -397,20 +394,20 @@ class AsyncEventWriter:
                 )
 
             except Exception as error:
-
                 print(
                     "[DB] Error guardando evento:",
                     error
                 )
 
             finally:
-
                 self.queue.task_done()
 
-    def close(self):
+    def flush(self):
+        self.queue.join()
 
-        # Todo lo colocado antes del sentinel
-        # se procesa primero.
+    def close(self):
+        self.flush()
+
         self.queue.put(
             None
         )

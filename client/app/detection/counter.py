@@ -10,28 +10,39 @@ class LineCounter:
         in_side=1,
         margin=18
     ):
-
         self.point1 = point1
         self.point2 = point2
 
-        self.in_side = in_side
+        self.in_side = (
+            1
+            if int(in_side) >= 0
+            else -1
+        )
 
-        # Distancia que debe superar para
-        # considerar que llegó a un lado estable
-        self.margin = margin
+        self.margin = max(
+            6,
+            int(margin)
+        )
+
+        self.crossing_margin = max(
+            4.0,
+            self.margin * 0.28
+        )
+
+        self.rearm_margin = max(
+            self.crossing_margin * 2.0,
+            self.margin * 0.65
+        )
 
         self.entries = 0
         self.exits = 0
 
-        # Estado independiente de cada ID
         self.states = {}
 
-    # ==========================================
-    # DISTANCIA CON SIGNO A LA LINEA
-    # ==========================================
-
-    def signed_distance(self, point):
-
+    def signed_distance(
+        self,
+        point
+    ):
         px, py = point
 
         x1, y1 = self.point1
@@ -50,19 +61,13 @@ class LineCounter:
 
         value = (
             dx * (py - y1)
-            -
-            dy * (px - x1)
+            - dy * (px - x1)
         )
 
         return value / length
 
-    # ==========================================
-    # SIGNO
-    # ==========================================
-
     @staticmethod
     def _sign(value):
-
         if value > 0:
             return 1
 
@@ -71,204 +76,157 @@ class LineCounter:
 
         return 0
 
-    # ==========================================
-    # UPDATE
-    # ==========================================
-
     def update(
         self,
         track_id,
         point
     ):
-
         distance = self.signed_distance(
             point
         )
 
-        raw_side = self._sign(
+        side = self._sign(
             distance
         )
 
+        if side == 0:
+            return None
+
         if track_id not in self.states:
-
             self.states[track_id] = {
-                # Primer lado del que parece venir
-                "origin_side": None,
-
-                # Último lado confirmado
-                "stable_side": None
+                "origin_side": side,
+                "stable_side": None,
+                "armed": False
             }
 
         state = self.states[
             track_id
         ]
 
-        # ==========================================
-        # PRIMERA APARICION
-        #
-        # Incluso si aparece cerca de la línea,
-        # guardamos el signo.
-        # ==========================================
-
         if state["origin_side"] is None:
-
-            if raw_side != 0:
-
-                state[
-                    "origin_side"
-                ] = raw_side
-
-        # ==========================================
-        # TODAVIA ESTA EN LA ZONA CENTRAL
-        #
-        # NO contamos, pero tampoco olvidamos
-        # de qué lado venía.
-        # ==========================================
-
-        if abs(distance) < self.margin:
-
-            return None
-
-        current_stable_side = raw_side
-
-        # ==========================================
-        # PRIMER LADO ESTABLE
-        # ==========================================
+            state["origin_side"] = side
 
         if state["stable_side"] is None:
-
-            # Si apareció cerca de la línea y ahora
-            # llegó al lado contrario al signo inicial,
-            # significa que ya completó un cruce.
             if (
-                state["origin_side"] is not None
-                and
-                state["origin_side"]
-                != current_stable_side
+                side != state["origin_side"]
+                and abs(distance)
+                >= self.crossing_margin
             ):
-
                 event = self._register_crossing(
-                    current_stable_side
+                    side
                 )
 
-                state[
-                    "stable_side"
-                ] = current_stable_side
-
-                state[
-                    "origin_side"
-                ] = current_stable_side
+                state["stable_side"] = side
+                state["origin_side"] = side
+                state["armed"] = False
 
                 return event
 
-            state[
-                "stable_side"
-            ] = current_stable_side
-
-            state[
-                "origin_side"
-            ] = current_stable_side
+            if (
+                abs(distance)
+                >= self.rearm_margin
+            ):
+                state["stable_side"] = side
+                state["origin_side"] = side
+                state["armed"] = True
 
             return None
 
-        # ==========================================
-        # SIGUE DEL MISMO LADO
-        # ==========================================
+        if not state["armed"]:
+            if (
+                side == state["stable_side"]
+                and abs(distance)
+                >= self.rearm_margin
+            ):
+                state["armed"] = True
+
+            return None
+
+        if side == state["stable_side"]:
+            return None
 
         if (
-            state["stable_side"]
-            == current_stable_side
+            abs(distance)
+            < self.crossing_margin
         ):
-
             return None
 
-        # ==========================================
-        # CRUCE CONFIRMADO
-        # ==========================================
-
         event = self._register_crossing(
-            current_stable_side
+            side
         )
 
-        state[
-            "stable_side"
-        ] = current_stable_side
-
-        state[
-            "origin_side"
-        ] = current_stable_side
+        state["stable_side"] = side
+        state["origin_side"] = side
+        state["armed"] = False
 
         return event
-
-    # ==========================================
-    # REGISTRAR EVENTO
-    # ==========================================
 
     def _register_crossing(
         self,
         destination_side
     ):
-
         if (
             destination_side
             == self.in_side
         ):
-
             self.entries += 1
-
             return "IN"
 
         self.exits += 1
-
         return "OUT"
-
-    # ==========================================
-    # CONFIGURACION
-    # ==========================================
 
     def set_line(
         self,
         point1,
         point2
     ):
-
         self.point1 = point1
         self.point2 = point2
-
         self.states.clear()
 
     def set_in_side(
         self,
-        in_side
+        in_side,
+        swap_counts=False
     ):
+        new_side = (
+            1
+            if int(in_side) >= 0
+            else -1
+        )
 
-        self.in_side = in_side
+        changed = (
+            new_side
+            != self.in_side
+        )
 
+        if (
+            changed
+            and swap_counts
+        ):
+            (
+                self.entries,
+                self.exits
+            ) = (
+                self.exits,
+                self.entries
+            )
+
+        self.in_side = new_side
         self.states.clear()
 
-    def invert_direction(self):
+        return changed
 
-        self.in_side *= -1
-
-        self.states.clear()
+    def invert_direction(
+        self,
+        swap_counts=False
+    ):
+        return self.set_in_side(
+            -self.in_side,
+            swap_counts=swap_counts
+        )
 
     def reset_counts(self):
-
         self.entries = 0
         self.exits = 0
-
         self.states.clear()
-
-    def set_counts(
-        self,
-        entries,
-        exits
-    ):
-
-        self.entries = int(
-            entries
-        )
-
-        self.exits = int(
-            exits
-        )
