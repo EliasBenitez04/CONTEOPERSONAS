@@ -8,7 +8,7 @@ class LineCounter:
         point1,
         point2,
         in_side=1,
-        margin=35
+        margin=18
     ):
 
         self.point1 = point1
@@ -16,18 +16,21 @@ class LineCounter:
 
         self.in_side = in_side
 
+        # Distancia que debe superar para
+        # considerar que llegó a un lado estable
         self.margin = margin
 
         self.entries = 0
         self.exits = 0
 
-        # Estado individual por ID
+        # Estado independiente de cada ID
         self.states = {}
 
-    def _signed_distance(
-        self,
-        point
-    ):
+    # ==========================================
+    # DISTANCIA CON SIGNO A LA LINEA
+    # ==========================================
+
+    def signed_distance(self, point):
 
         px, py = point
 
@@ -37,14 +40,14 @@ class LineCounter:
         dx = x2 - x1
         dy = y2 - y1
 
-        length = math.sqrt(
-            dx * dx + dy * dy
+        length = math.hypot(
+            dx,
+            dy
         )
 
         if length == 0:
-            return 0
+            return 0.0
 
-        # Distancia perpendicular con signo
         value = (
             dx * (py - y1)
             -
@@ -53,23 +56,24 @@ class LineCounter:
 
         return value / length
 
-    def _stable_side(
-        self,
-        point
-    ):
+    # ==========================================
+    # SIGNO
+    # ==========================================
 
-        distance = self._signed_distance(
-            point
-        )
+    @staticmethod
+    def _sign(value):
 
-        # Zona muerta alrededor de la línea
-        if abs(distance) < self.margin:
-            return 0
-
-        if distance > 0:
+        if value > 0:
             return 1
 
-        return -1
+        if value < 0:
+            return -1
+
+        return 0
+
+    # ==========================================
+    # UPDATE
+    # ==========================================
 
     def update(
         self,
@@ -77,19 +81,22 @@ class LineCounter:
         point
     ):
 
-        side = self._stable_side(
+        distance = self.signed_distance(
             point
         )
 
-        # ==============================
-        # CREAR ESTADO DEL ID
-        # ==============================
+        raw_side = self._sign(
+            distance
+        )
 
         if track_id not in self.states:
 
             self.states[track_id] = {
+                # Primer lado del que parece venir
                 "origin_side": None,
-                "last_side": None
+
+                # Último lado confirmado
+                "stable_side": None
             }
 
         state = self.states[
@@ -97,21 +104,70 @@ class LineCounter:
         ]
 
         # ==========================================
-        # ESTÁ CERCA DE LA LÍNEA
-        # No hacemos absolutamente nada
-        # ==========================================
-
-        if side == 0:
-            return None
-
-        # ==========================================
-        # PRIMER LADO ESTABLE OBSERVADO
+        # PRIMERA APARICION
+        #
+        # Incluso si aparece cerca de la línea,
+        # guardamos el signo.
         # ==========================================
 
         if state["origin_side"] is None:
 
-            state["origin_side"] = side
-            state["last_side"] = side
+            if raw_side != 0:
+
+                state[
+                    "origin_side"
+                ] = raw_side
+
+        # ==========================================
+        # TODAVIA ESTA EN LA ZONA CENTRAL
+        #
+        # NO contamos, pero tampoco olvidamos
+        # de qué lado venía.
+        # ==========================================
+
+        if abs(distance) < self.margin:
+
+            return None
+
+        current_stable_side = raw_side
+
+        # ==========================================
+        # PRIMER LADO ESTABLE
+        # ==========================================
+
+        if state["stable_side"] is None:
+
+            # Si apareció cerca de la línea y ahora
+            # llegó al lado contrario al signo inicial,
+            # significa que ya completó un cruce.
+            if (
+                state["origin_side"] is not None
+                and
+                state["origin_side"]
+                != current_stable_side
+            ):
+
+                event = self._register_crossing(
+                    current_stable_side
+                )
+
+                state[
+                    "stable_side"
+                ] = current_stable_side
+
+                state[
+                    "origin_side"
+                ] = current_stable_side
+
+                return event
+
+            state[
+                "stable_side"
+            ] = current_stable_side
+
+            state[
+                "origin_side"
+            ] = current_stable_side
 
             return None
 
@@ -119,31 +175,56 @@ class LineCounter:
         # SIGUE DEL MISMO LADO
         # ==========================================
 
-        if side == state["last_side"]:
+        if (
+            state["stable_side"]
+            == current_stable_side
+        ):
 
             return None
 
         # ==========================================
-        # LLEGÓ ESTABLE AL OTRO LADO
         # CRUCE CONFIRMADO
         # ==========================================
 
-        old_side = state["last_side"]
+        event = self._register_crossing(
+            current_stable_side
+        )
 
-        state["last_side"] = side
-        state["origin_side"] = side
+        state[
+            "stable_side"
+        ] = current_stable_side
 
-        # Entró hacia el lado configurado como IN
-        if side == self.in_side:
+        state[
+            "origin_side"
+        ] = current_stable_side
+
+        return event
+
+    # ==========================================
+    # REGISTRAR EVENTO
+    # ==========================================
+
+    def _register_crossing(
+        self,
+        destination_side
+    ):
+
+        if (
+            destination_side
+            == self.in_side
+        ):
 
             self.entries += 1
 
             return "IN"
 
-        # Se movió hacia el lado OUT
         self.exits += 1
 
         return "OUT"
+
+    # ==========================================
+    # CONFIGURACION
+    # ==========================================
 
     def set_line(
         self,

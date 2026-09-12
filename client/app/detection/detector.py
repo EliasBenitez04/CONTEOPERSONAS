@@ -80,20 +80,26 @@ class PersonDetector:
             point_x = (
                 x1 + x2
             ) // 2
-
-            point_y = y2
-
+            
+            point_y = (
+                y1 + y2
+            ) // 2
+            
             persons.append({
                 "id": int(track_id),
+            
                 "x1": x1,
                 "y1": y1,
                 "x2": x2,
                 "y2": y2,
-                "confidence": float(confidence),
+            
+                "confidence": float(
+                    confidence
+                ),
             
                 "point": (
-                    (x1 + x2) // 2,
-                    (y1 + y2) // 2
+                    point_x,
+                    point_y
                 )
             })
 

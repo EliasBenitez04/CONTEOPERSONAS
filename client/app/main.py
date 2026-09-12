@@ -65,7 +65,8 @@ def main():
     counter = LineCounter(
         point1=line_p1,
         point2=line_p2,
-        in_side=config["in_side"]
+        in_side=config["in_side"],
+        margin=config["margin"]
     )
 
     try:
