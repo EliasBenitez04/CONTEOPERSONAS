@@ -25,6 +25,11 @@ def get_line(config):
     return p1, p2
 
 
+def normalize_side(value):
+
+    return 1 if value >= 0 else -1
+
+
 def draw_panel(frame, session_in, session_out, today_in, today_out):
 
     overlay = frame.copy()
@@ -32,7 +37,7 @@ def draw_panel(frame, session_in, session_out, today_in, today_out):
     cv2.rectangle(
         overlay,
         (12, 12),
-        (390, 205),
+        (410, 218),
         (20, 20, 20),
         -1
     )
@@ -96,6 +101,16 @@ def draw_panel(frame, session_in, session_out, today_in, today_out):
         0.60,
         (210, 210, 210),
         2
+    )
+
+    cv2.putText(
+        frame,
+        "C: configurar linea y direccion",
+        (28, 207),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.50,
+        (180, 180, 180),
+        1
     )
 
 
@@ -183,9 +198,8 @@ def main():
         margin=config["margin"]
     )
 
-    # IMPORTANTE:
     # counter.entries/exits representan SOLO esta ejecucion.
-    # Los registros historicos del dia permanecen en SQLite.
+    # El historial diario permanece guardado en SQLite.
     database = LocalDatabase()
     event_writer = AsyncEventWriter(database)
 
@@ -290,16 +304,6 @@ def main():
                 today_out
             )
 
-            cv2.putText(
-                frame,
-                "C: configurar linea | Q: salir",
-                (20, max(235, frame.shape[0] - 22)),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.62,
-                (255, 255, 255),
-                2
-            )
-
             cv2.imshow(
                 settings.CAMERA_NAME,
                 frame
@@ -312,6 +316,8 @@ def main():
 
             elif key == ord("c"):
 
+                previous_in_side = counter.in_side
+
                 configurator = LineConfigurator()
                 new_config = configurator.run(frame)
 
@@ -320,18 +326,59 @@ def main():
                     config = new_config
                     line_p1, line_p2 = get_line(config)
 
+                    new_in_side = normalize_side(
+                        config["in_side"]
+                    )
+
+                    direction_changed = (
+                        new_in_side != previous_in_side
+                    )
+
                     counter.set_line(
                         line_p1,
                         line_p2
                     )
 
-                    counter.set_in_side(
-                        config["in_side"]
-                    )
+                    if direction_changed:
 
-                    print(
-                        "[CONFIG] Nueva linea y direccion aplicadas."
-                    )
+                        # Aseguramos que no quede ningun evento viejo en
+                        # la cola antes de reclasificar el dia completo.
+                        event_writer.flush()
+
+                        database.swap_today_event_types(
+                            branch_id=settings.BRANCH_ID,
+                            camera_name=settings.CAMERA_NAME
+                        )
+
+                        # Intercambia tambien los conteos de esta sesion.
+                        counter.set_in_side(
+                            new_in_side,
+                            swap_counts=True
+                        )
+
+                        # El acumulado previo al inicio de esta ejecucion
+                        # pertenece al mismo dia y tambien debe invertirse.
+                        session_base_in, session_base_out = (
+                            session_base_out,
+                            session_base_in
+                        )
+
+                        print(
+                            "[CONFIG] Direccion invertida: "
+                            "vista, sesion y registros de hoy actualizados."
+                        )
+
+                    else:
+
+                        counter.set_in_side(
+                            new_in_side,
+                            swap_counts=False
+                        )
+
+                        print(
+                            "[CONFIG] Nueva linea aplicada "
+                            "sin cambiar la direccion."
+                        )
 
     except KeyboardInterrupt:
 
