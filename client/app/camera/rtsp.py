@@ -11,9 +11,13 @@ class RTSPCamera:
         reconnect_seconds: int = 3
     ):
 
-        self.camera = Camera(rtsp_url)
+        self.camera = Camera(
+            rtsp_url
+        )
 
-        self.reconnect_seconds = reconnect_seconds
+        self.reconnect_seconds = (
+            reconnect_seconds
+        )
 
         self.running = False
 
@@ -25,13 +29,15 @@ class RTSPCamera:
 
             if not self.camera.is_connected():
 
-                connected = self.camera.connect()
+                connected = (
+                    self.camera.connect()
+                )
 
                 if not connected:
 
                     print(
-                        f"[RTSP] Reintentando en "
-                        f"{self.reconnect_seconds} segundos..."
+                        "[RTSP] Reintentando "
+                        f"en {self.reconnect_seconds}s..."
                     )
 
                     time.sleep(
@@ -40,13 +46,15 @@ class RTSPCamera:
 
                     continue
 
-            success, frame = self.camera.read()
+            success, frame = (
+                self.camera.read()
+            )
 
             if not success:
 
                 print(
-                    "[RTSP] Se perdio la conexion "
-                    "con la camara."
+                    "[RTSP] No se reciben "
+                    "frames actuales."
                 )
 
                 self.camera.disconnect()
@@ -58,6 +66,9 @@ class RTSPCamera:
                 continue
 
             yield frame
+
+            # Evita bucle excesivamente agresivo
+            time.sleep(0.001)
 
     def stop(self):
 

@@ -1,3 +1,6 @@
+import math
+
+
 class LineCounter:
 
     def __init__(
@@ -5,102 +8,139 @@ class LineCounter:
         point1,
         point2,
         in_side=1,
-        min_frames_between_counts=10
+        margin=35
     ):
+
         self.point1 = point1
         self.point2 = point2
 
-        # Indica qué lado matemático consideramos IN.
-        # Puede ser 1 o -1.
         self.in_side = in_side
+
+        self.margin = margin
 
         self.entries = 0
         self.exits = 0
 
-        # Último lado conocido de cada ID
-        self.last_side = {}
+        # Estado individual por ID
+        self.states = {}
 
-        # Para evitar doble conteo inmediato
-        self.last_count_frame = {}
+    def _signed_distance(
+        self,
+        point
+    ):
 
-        self.frame_number = 0
-        self.min_frames_between_counts = (
-            min_frames_between_counts
-        )
-
-    def _side_of_line(self, point):
-
-        x, y = point
+        px, py = point
 
         x1, y1 = self.point1
         x2, y2 = self.point2
 
-        value = (
-            (x2 - x1) * (y - y1)
-            -
-            (y2 - y1) * (x - x1)
+        dx = x2 - x1
+        dy = y2 - y1
+
+        length = math.sqrt(
+            dx * dx + dy * dy
         )
 
-        if value > 0:
-            return 1
+        if length == 0:
+            return 0
 
-        if value < 0:
-            return -1
+        # Distancia perpendicular con signo
+        value = (
+            dx * (py - y1)
+            -
+            dy * (px - x1)
+        )
 
-        return 0
+        return value / length
 
-    def update(self, track_id, point):
+    def _stable_side(
+        self,
+        point
+    ):
 
-        self.frame_number += 1
-
-        current_side = self._side_of_line(
+        distance = self._signed_distance(
             point
         )
 
-        if current_side == 0:
-            return None
+        # Zona muerta alrededor de la línea
+        if abs(distance) < self.margin:
+            return 0
 
-        previous_side = self.last_side.get(
+        if distance > 0:
+            return 1
+
+        return -1
+
+    def update(
+        self,
+        track_id,
+        point
+    ):
+
+        side = self._stable_side(
+            point
+        )
+
+        # ==============================
+        # CREAR ESTADO DEL ID
+        # ==============================
+
+        if track_id not in self.states:
+
+            self.states[track_id] = {
+                "origin_side": None,
+                "last_side": None
+            }
+
+        state = self.states[
             track_id
-        )
+        ]
 
-        self.last_side[track_id] = (
-            current_side
-        )
+        # ==========================================
+        # ESTÁ CERCA DE LA LÍNEA
+        # No hacemos absolutamente nada
+        # ==========================================
 
-        # Primera vez que vemos ese ID
-        if previous_side is None:
+        if side == 0:
             return None
 
-        # Sigue del mismo lado
-        if previous_side == current_side:
+        # ==========================================
+        # PRIMER LADO ESTABLE OBSERVADO
+        # ==========================================
+
+        if state["origin_side"] is None:
+
+            state["origin_side"] = side
+            state["last_side"] = side
+
             return None
 
-        # Protección contra doble conteo
-        last_count = self.last_count_frame.get(
-            track_id,
-            -99999
-        )
+        # ==========================================
+        # SIGUE DEL MISMO LADO
+        # ==========================================
 
-        if (
-            self.frame_number - last_count
-            <
-            self.min_frames_between_counts
-        ):
+        if side == state["last_side"]:
+
             return None
 
-        self.last_count_frame[track_id] = (
-            self.frame_number
-        )
+        # ==========================================
+        # LLEGÓ ESTABLE AL OTRO LADO
+        # CRUCE CONFIRMADO
+        # ==========================================
 
-        # Entró al lado IN
-        if current_side == self.in_side:
+        old_side = state["last_side"]
+
+        state["last_side"] = side
+        state["origin_side"] = side
+
+        # Entró hacia el lado configurado como IN
+        if side == self.in_side:
 
             self.entries += 1
 
             return "IN"
 
-        # Salió del lado IN
+        # Se movió hacia el lado OUT
         self.exits += 1
 
         return "OUT"
@@ -114,10 +154,26 @@ class LineCounter:
         self.point1 = point1
         self.point2 = point2
 
-        self.last_side.clear()
+        self.states.clear()
+
+    def set_in_side(
+        self,
+        in_side
+    ):
+
+        self.in_side = in_side
+
+        self.states.clear()
 
     def invert_direction(self):
 
         self.in_side *= -1
 
-        self.last_side.clear()
+        self.states.clear()
+
+    def reset_counts(self):
+
+        self.entries = 0
+        self.exits = 0
+
+        self.states.clear()

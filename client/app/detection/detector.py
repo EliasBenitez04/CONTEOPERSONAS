@@ -6,10 +6,16 @@ class PersonDetector:
     def __init__(
         self,
         model_path="yolov8n.pt",
-        confidence=0.40
+        confidence=0.30,
+        imgsz=640
     ):
-        self.model = YOLO(model_path)
+
+        self.model = YOLO(
+            model_path
+        )
+
         self.confidence = confidence
+        self.imgsz = imgsz
 
         print("[YOLO] Modelo cargado.")
 
@@ -20,6 +26,7 @@ class PersonDetector:
             persist=True,
             classes=[0],
             conf=self.confidence,
+            imgsz=self.imgsz,
             tracker="bytetrack.yaml",
             verbose=False
         )
@@ -37,31 +44,56 @@ class PersonDetector:
         if result.boxes.id is None:
             return persons
 
-        boxes = result.boxes.xyxy.cpu().tolist()
-        ids = result.boxes.id.int().cpu().tolist()
-        confs = result.boxes.conf.cpu().tolist()
+        boxes = (
+            result.boxes.xyxy
+            .cpu()
+            .tolist()
+        )
+
+        ids = (
+            result.boxes.id
+            .int()
+            .cpu()
+            .tolist()
+        )
+
+        confidences = (
+            result.boxes.conf
+            .cpu()
+            .tolist()
+        )
 
         for box, track_id, confidence in zip(
             boxes,
             ids,
-            confs
+            confidences
         ):
+
             x1, y1, x2, y2 = box
 
-            point_x = int((x1 + x2) / 2)
-            point_y = int(y2)
+            x1 = int(x1)
+            y1 = int(y1)
+            x2 = int(x2)
+            y2 = int(y2)
+
+            # Punto inferior central
+            point_x = (
+                x1 + x2
+            ) // 2
+
+            point_y = y2
 
             persons.append({
-                "id": track_id,
-                "x1": int(x1),
-                "y1": int(y1),
-                "x2": int(x2),
-                "y2": int(y2),
+                "id": int(track_id),
+                "x1": x1,
+                "y1": y1,
+                "x2": x2,
+                "y2": y2,
                 "confidence": float(confidence),
-
+            
                 "point": (
-                    point_x,
-                    point_y
+                    (x1 + x2) // 2,
+                    (y1 + y2) // 2
                 )
             })
 

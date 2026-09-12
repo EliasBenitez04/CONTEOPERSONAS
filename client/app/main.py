@@ -2,7 +2,14 @@ import cv2
 
 from app.camera.rtsp import RTSPCamera
 from app.config.settings import settings
-from app.gui.line_config import LineConfigurator
+
+from app.config.camera_config import (
+    load_camera_config
+)
+
+from app.gui.line_config import (
+    LineConfigurator
+)
 
 from app.detection.detector import (
     PersonDetector
@@ -13,20 +20,28 @@ from app.detection.counter import (
 )
 
 
+def get_line(
+    config
+):
+
+    p1 = (
+        config["line"]["x1"],
+        config["line"]["y1"]
+    )
+
+    p2 = (
+        config["line"]["x2"],
+        config["line"]["y2"]
+    )
+
+    return p1, p2
+
+
 def main():
 
     print("=" * 60)
     print("SISTEMA DE CONTEO DE PERSONAS")
     print("=" * 60)
-
-    if not settings.CAMERA_RTSP_URL:
-
-        print(
-            "[ERROR] CAMERA_RTSP_URL "
-            "no configurado."
-        )
-
-        return
 
     camera = RTSPCamera(
         rtsp_url=settings.CAMERA_RTSP_URL,
@@ -35,25 +50,16 @@ def main():
 
     detector = PersonDetector(
         model_path="yolov8n.pt",
-        confidence=0.40
+        confidence=0.30,
+        imgsz=640
     )
 
-    # ==========================================
-    # LINEA DE PRUEBA
-    # ==========================================
-
-    from app.config.camera_config import load_camera_config
-    
-    config = load_camera_config()
-
-    line_p1 = (
-        config["line"]["x1"],
-        config["line"]["y1"]
+    config = (
+        load_camera_config()
     )
 
-    line_p2 = (
-        config["line"]["x2"],
-        config["line"]["y2"]
+    line_p1, line_p2 = (
+        get_line(config)
     )
 
     counter = LineCounter(
@@ -61,19 +67,20 @@ def main():
         point2=line_p2,
         in_side=config["in_side"]
     )
-    
 
     try:
 
         for frame in camera.start():
 
-            persons = detector.track(
-                frame
+            persons = (
+                detector.track(
+                    frame
+                )
             )
 
-            # ==========================================
-            # DIBUJAR LINEA
-            # ==========================================
+            # ==============================
+            # LINEA
+            # ==============================
 
             cv2.line(
                 frame,
@@ -83,58 +90,30 @@ def main():
                 3
             )
 
-            # ==========================================
-            # MARCAR LADOS
-            # ==========================================
-
-            
-            cv2.putText(
-                frame,
-                "OUT",
-                (
-                    line_p1[0] - 120,
-                    line_p1[1] + 40
-                ),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                1,
-                (0, 0, 255),
-                2
-            )
-
-            cv2.putText(
-                frame,
-                "IN",
-                (
-                    line_p1[0] + 30,
-                    line_p1[1] + 40
-                ),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                1,
-                (0, 255, 0),
-                2
-            )
-
-            # ==========================================
+            # ==============================
             # PERSONAS
-            # ==========================================
+            # ==============================
 
             for person in persons:
 
-                track_id = person["id"]
+                track_id = (
+                    person["id"]
+                )
 
-                x1 = person["x1"]
-                y1 = person["y1"]
-                x2 = person["x2"]
-                y2 = person["y2"]
-
-                point = person["point"]
+                point = (
+                    person["point"]
+                )
 
                 event = counter.update(
                     track_id,
                     point
                 )
 
-                # Bounding box temporal
+                x1 = person["x1"]
+                y1 = person["y1"]
+                x2 = person["x2"]
+                y2 = person["y2"]
+
                 cv2.rectangle(
                     frame,
                     (x1, y1),
@@ -143,7 +122,6 @@ def main():
                     2
                 )
 
-                # Punto usado para cruzar línea
                 cv2.circle(
                     frame,
                     point,
@@ -157,31 +135,28 @@ def main():
                     f"ID {track_id}",
                     (
                         x1,
-                        y1 - 10
+                        max(
+                            20,
+                            y1 - 10
+                        )
                     ),
                     cv2.FONT_HERSHEY_SIMPLEX,
-                    0.6,
+                    0.65,
                     (0, 255, 0),
                     2
                 )
 
-                if event == "IN":
+                if event:
 
                     print(
-                        f"[CONTEO] ID {track_id} "
-                        "ENTRADA"
+                        f"[CONTEO] "
+                        f"ID {track_id}: "
+                        f"{event}"
                     )
 
-                elif event == "OUT":
-
-                    print(
-                        f"[CONTEO] ID {track_id} "
-                        "SALIDA"
-                    )
-
-            # ==========================================
-            # PANEL DE CONTEO
-            # ==========================================
+            # ==============================
+            # CONTADORES
+            # ==============================
 
             cv2.putText(
                 frame,
@@ -203,26 +178,72 @@ def main():
                 2
             )
 
+            cv2.putText(
+                frame,
+                "C = configurar linea",
+                (20, 120),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.7,
+                (255, 255, 255),
+                2
+            )
+
             cv2.imshow(
                 settings.CAMERA_NAME,
                 frame
             )
 
-            key = cv2.waitKey(1) & 0xFF
+            key = (
+                cv2.waitKey(1)
+                & 0xFF
+            )
 
             if key == ord("q"):
+
                 break
 
-            # Presionando I invertimos
-            # IN / OUT durante las pruebas
-            elif key == ord("i"):
+            # ==============================
+            # CONFIGURAR LINEA
+            # ==============================
 
-                counter.invert_direction()
+            elif key == ord("c"):
 
-                print(
-                    "[CONFIG] Direccion "
-                    "IN/OUT invertida."
+                configurator = (
+                    LineConfigurator()
                 )
+
+                new_config = (
+                    configurator.run(
+                        frame
+                    )
+                )
+
+                if new_config:
+
+                    config = (
+                        new_config
+                    )
+
+                    (
+                        line_p1,
+                        line_p2
+                    ) = get_line(
+                        config
+                    )
+
+                    counter.set_line(
+                        line_p1,
+                        line_p2
+                    )
+
+                    counter.set_in_side(
+                        config["in_side"]
+                    )
+
+                    print(
+                        "[CONFIG] Nueva linea "
+                        "aplicada."
+                    )
 
     except KeyboardInterrupt:
 

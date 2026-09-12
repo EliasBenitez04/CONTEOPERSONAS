@@ -10,12 +10,14 @@ class LineConfigurator:
 
     def __init__(self):
 
+        self.config = (
+            load_camera_config()
+        )
+
         self.points = []
 
-        self.frame = None
         self.original_frame = None
-
-        self.config = load_camera_config()
+        self.frame = None
 
     def mouse_event(
         self,
@@ -26,10 +28,16 @@ class LineConfigurator:
         param
     ):
 
-        if event != cv2.EVENT_LBUTTONDOWN:
+        if (
+            event
+            != cv2.EVENT_LBUTTONDOWN
+        ):
             return
 
-        if len(self.points) >= 2:
+        # Si ya hay 2 puntos,
+        # comenzar nuevamente
+        if len(self.points) == 2:
+
             self.points = []
 
         self.points.append(
@@ -40,80 +48,112 @@ class LineConfigurator:
 
     def draw(self):
 
-        if self.original_frame is None:
-            return
-
-        self.frame = self.original_frame.copy()
+        self.frame = (
+            self.original_frame.copy()
+        )
 
         for point in self.points:
 
             cv2.circle(
                 self.frame,
                 point,
-                6,
+                7,
                 (0, 255, 255),
                 -1
             )
 
         if len(self.points) == 2:
 
+            p1 = self.points[0]
+            p2 = self.points[1]
+
             cv2.line(
                 self.frame,
-                self.points[0],
-                self.points[1],
+                p1,
+                p2,
                 (255, 0, 255),
                 3
             )
 
         cv2.putText(
             self.frame,
-            "Click 2 puntos para definir la linea",
-            (20, 40),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.8,
-            (255, 255, 255),
-            2
-        )
-
-        cv2.putText(
-            self.frame,
-            "S = Guardar | I = Invertir IN/OUT | Q = Salir",
-            (20, 80),
+            "Click: seleccionar 2 puntos",
+            (20, 35),
             cv2.FONT_HERSHEY_SIMPLEX,
             0.7,
             (255, 255, 255),
             2
         )
 
-    def run(self, frame):
+        cv2.putText(
+            self.frame,
+            "S: Guardar",
+            (20, 70),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.7,
+            (0, 255, 0),
+            2
+        )
 
-        self.original_frame = frame.copy()
+        cv2.putText(
+            self.frame,
+            "I: Invertir IN / OUT",
+            (20, 105),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.7,
+            (0, 255, 255),
+            2
+        )
 
-        current_line = self.config["line"]
+        cv2.putText(
+            self.frame,
+            "Q: Cancelar",
+            (20, 140),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.7,
+            (0, 0, 255),
+            2
+        )
+
+    def run(
+        self,
+        frame
+    ):
+
+        self.original_frame = (
+            frame.copy()
+        )
+
+        line = self.config["line"]
 
         self.points = [
             (
-                current_line["x1"],
-                current_line["y1"]
+                line["x1"],
+                line["y1"]
             ),
             (
-                current_line["x2"],
-                current_line["y2"]
+                line["x2"],
+                line["y2"]
             )
         ]
 
         self.draw()
 
-        window_name = "CONFIGURAR LINEA"
+        window_name = (
+            "CONFIGURAR LINEA"
+        )
 
         cv2.namedWindow(
-            window_name
+            window_name,
+            cv2.WINDOW_NORMAL
         )
 
         cv2.setMouseCallback(
             window_name,
             self.mouse_event
         )
+
+        saved = False
 
         while True:
 
@@ -122,7 +162,10 @@ class LineConfigurator:
                 self.frame
             )
 
-            key = cv2.waitKey(20) & 0xFF
+            key = (
+                cv2.waitKey(20)
+                & 0xFF
+            )
 
             if key == ord("q"):
 
@@ -130,18 +173,21 @@ class LineConfigurator:
 
             elif key == ord("i"):
 
-                self.config["in_side"] *= -1
+                self.config[
+                    "in_side"
+                ] *= -1
 
                 print(
                     "[CONFIG] IN/OUT invertido."
                 )
 
-            elif key == ord("C"):
+            elif key == ord("s"):
 
                 if len(self.points) != 2:
 
                     print(
-                        "[CONFIG] Debes seleccionar 2 puntos."
+                        "[CONFIG] Seleccione "
+                        "2 puntos."
                     )
 
                     continue
@@ -160,12 +206,21 @@ class LineConfigurator:
                     self.config
                 )
 
+                saved = True
+
                 print(
-                    "[CONFIG] Linea guardada correctamente."
+                    "[CONFIG] Configuracion "
+                    "guardada."
                 )
 
                 break
 
         cv2.destroyWindow(
             window_name
+        )
+
+        return (
+            self.config
+            if saved
+            else None
         )
