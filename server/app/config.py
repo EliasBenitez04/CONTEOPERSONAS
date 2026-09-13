@@ -51,15 +51,20 @@ class Settings:
         ""
     ).strip()
 
+    _DEFAULT_POSTGRES_URL = (
+        "postgresql+psycopg2://"
+        f"{quote_plus(PG_USER)}:"
+        f"{quote_plus(PG_PASSWORD)}@"
+        f"{PG_HOST}:{PG_PORT}/"
+        f"{quote_plus(PG_DATABASE)}"
+    )
+
     DATABASE_URL = (
         _DATABASE_URL_OVERRIDE
-        or (
-            "postgresql+psycopg2://"
-            f"{quote_plus(PG_USER)}:"
-            f"{quote_plus(PG_PASSWORD)}@"
-            f"{PG_HOST}:{PG_PORT}/"
-            f"{quote_plus(PG_DATABASE)}"
+        if _DATABASE_URL_OVERRIDE.startswith(
+            ("postgresql://", "postgresql+psycopg2://")
         )
+        else _DEFAULT_POSTGRES_URL
     )
 
     API_TOKEN = os.getenv(
