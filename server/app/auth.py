@@ -3,11 +3,9 @@ import hashlib
 import hmac
 import json
 import os
-import secrets
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
@@ -16,15 +14,13 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
-from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.config import settings
-from app.database import SessionLocal, get_database
-from app.models import User
+from app.database import get_database
+from app.models import AuditLog, User
 
 
 router = APIRouter()
-
 TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
@@ -69,7 +65,6 @@ def hash_password(password: str):
         salt,
         PASSWORD_ITERATIONS
     )
-
     return "pbkdf2_sha256${}${}${}".format(
         PASSWORD_ITERATIONS,
         base64.urlsafe_b64encode(salt).decode("ascii"),
@@ -82,7 +77,6 @@ def verify_password(password: str, encoded: str):
         algorithm, iterations, salt_b64, hash_b64 = encoded.split("$", 3)
         if algorithm != "pbkdf2_sha256":
             return False
-
         salt = base64.urlsafe_b64decode(salt_b64.encode("ascii"))
         expected = base64.urlsafe_b64decode(hash_b64.encode("ascii"))
         derived = hashlib.pbkdf2_hmac(
@@ -111,10 +105,7 @@ def create_session_token(user: User):
         "exp": int(time.time()) + (settings.SESSION_HOURS * 3600)
     }
     body = _b64encode(
-        json.dumps(
-            payload,
-            separators=(",", ":")
-        ).encode("utf-8")
+        json.dumps(payload, separators=(",", ":")).encode("utf-8")
     )
     signature = hmac.new(
         settings.SESSION_SECRET.encode("utf-8"),
@@ -127,7 +118,6 @@ def create_session_token(user: User):
 def parse_session_token(token: str | None):
     if not token or "." not in token:
         return None
-
     try:
         body, signature = token.split(".", 1)
         expected = hmac.new(
@@ -136,34 +126,24 @@ def parse_session_token(token: str | None):
             hashlib.sha256
         ).digest()
         supplied = _b64decode(signature)
-
         if not hmac.compare_digest(expected, supplied):
             return None
 
-        payload = json.loads(
-            _b64decode(body).decode("utf-8")
-        )
-
+        payload = json.loads(_b64decode(body).decode("utf-8"))
         if int(payload.get("exp", 0)) < int(time.time()):
             return None
-
         return int(payload["uid"])
     except (ValueError, TypeError, KeyError, json.JSONDecodeError):
         return None
 
 
 def session_user_from_request(request: Request, database: Session):
-    user_id = parse_session_token(
-        request.cookies.get(COOKIE_NAME)
-    )
-
+    user_id = parse_session_token(request.cookies.get(COOKIE_NAME))
     if user_id is None:
         return None
-
     user = database.get(User, user_id)
     if user is None or not user.active:
         return None
-
     return user
 
 
@@ -211,91 +191,28 @@ def _active_admin_count(database: Session):
     )
 
 
-class WebAuthMiddleware(BaseHTTPMiddleware):
-    PROTECTED_WEB_PREFIXES = (
-        "/dashboard",
-        "/reports",
-        "/admin",
-        "/users",
-        "/change-password"
-    )
-
-    PROTECTED_API_PREFIXES = (
-        "/api/dashboard-data",
-        "/api/reports",
-        "/api/admin",
-        "/api/users",
-        "/api/auth/me",
-        "/api/auth/change-password"
-    )
-
-    ADMIN_PREFIXES = (
-        "/admin",
-        "/users",
-        "/api/admin",
-        "/api/users"
-    )
-
-    async def dispatch(self, request: Request, call_next):
-        path = request.url.path
-
-        protected = (
-            path.startswith(self.PROTECTED_WEB_PREFIXES)
-            or path.startswith(self.PROTECTED_API_PREFIXES)
-        )
-
-        if not protected:
-            return await call_next(request)
-
-        database = SessionLocal()
-        try:
-            user = session_user_from_request(request, database)
-            request.state.user = user
-
-            if user is None:
-                if path.startswith("/api/"):
-                    return JSONResponse(
-                        status_code=status.HTTP_401_UNAUTHORIZED,
-                        content={"detail": "Sesión requerida"}
-                    )
-
-                next_path = quote(path, safe="/")
-                return RedirectResponse(
-                    url=f"/login?next={next_path}",
-                    status_code=status.HTTP_303_SEE_OTHER
-                )
-
-            is_change_path = (
-                path == "/change-password"
-                or path == "/api/auth/change-password"
-                or path == "/api/auth/me"
+def _audit(
+    database: Session,
+    request: Request,
+    user: User | None,
+    action: str,
+    status_code: int = 200
+):
+    try:
+        database.add(
+            AuditLog(
+                user_id=user.id if user else None,
+                username=user.username if user else None,
+                action=action,
+                method=request.method,
+                path=request.url.path,
+                status_code=status_code,
+                ip_address=(request.client.host if request.client else None)
             )
-
-            if user.must_change_password and not is_change_path:
-                if path.startswith("/api/"):
-                    return JSONResponse(
-                        status_code=status.HTTP_403_FORBIDDEN,
-                        content={"detail": "Debe cambiar su contraseña"}
-                    )
-                return RedirectResponse(
-                    url="/change-password",
-                    status_code=status.HTTP_303_SEE_OTHER
-                )
-
-            if path.startswith(self.ADMIN_PREFIXES) and user.role != "ADMIN":
-                if path.startswith("/api/"):
-                    return JSONResponse(
-                        status_code=status.HTTP_403_FORBIDDEN,
-                        content={"detail": "Permiso de administrador requerido"}
-                    )
-                return RedirectResponse(
-                    url="/dashboard?forbidden=1",
-                    status_code=status.HTTP_303_SEE_OTHER
-                )
-
-            return await call_next(request)
-        finally:
-            database.close()
+        )
+        database.commit()
+    except Exception:
+        database.rollback()
 
 
 @router.get("/login", response_class=HTMLResponse)
@@ -309,7 +226,6 @@ def login_page(
             url="/dashboard",
             status_code=status.HTTP_303_SEE_OTHER
         )
-
     return templates.TemplateResponse(
         request=request,
         name="login.html",
@@ -319,14 +235,13 @@ def login_page(
 
 @router.post("/api/auth/login")
 def login(
+    request: Request,
     payload: LoginPayload,
     database: Session = Depends(get_database)
 ):
     username = payload.username.strip().lower()
     user = database.scalar(
-        select(User).where(
-            func.lower(User.username) == username
-        )
+        select(User).where(func.lower(User.username) == username)
     )
 
     if (
@@ -334,6 +249,7 @@ def login(
         or not user.active
         or not verify_password(payload.password, user.password_hash)
     ):
+        _audit(database, request, user, "Login fallido", 401)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Usuario o contraseña incorrectos"
@@ -341,6 +257,7 @@ def login(
 
     user.last_login_at = datetime.now(timezone.utc)
     database.commit()
+    _audit(database, request, user, "Inicio de sesión", 200)
 
     token = create_session_token(user)
     response = JSONResponse({
@@ -358,29 +275,37 @@ def login(
         max_age=settings.SESSION_HOURS * 3600,
         httponly=True,
         samesite="lax",
-        secure=False,
+        secure=settings.SESSION_COOKIE_SECURE,
         path="/"
     )
     return response
 
 
 @router.get("/logout")
-def logout():
+def logout(
+    request: Request,
+    database: Session = Depends(get_database)
+):
+    user = session_user_from_request(request, database)
+    if user:
+        _audit(database, request, user, "Cierre de sesión", 200)
+
     response = RedirectResponse(
         url="/login",
         status_code=status.HTTP_303_SEE_OTHER
     )
     response.delete_cookie(
         COOKIE_NAME,
-        path="/"
+        path="/",
+        secure=settings.SESSION_COOKIE_SECURE,
+        samesite="lax"
     )
     return response
 
 
 @router.get("/api/auth/me")
 def auth_me(request: Request):
-    user = request.state.user
-    return user_to_dict(user)
+    return user_to_dict(request.state.user)
 
 
 @router.get("/change-password", response_class=HTMLResponse)
@@ -400,27 +325,15 @@ def change_password(
 ):
     user = database.get(User, request.state.user.id)
     if user is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Sesión inválida"
-        )
-
+        raise HTTPException(status_code=401, detail="Sesión inválida")
     if not verify_password(payload.current_password, user.password_hash):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="La contraseña actual no es correcta"
-        )
-
+        raise HTTPException(status_code=400, detail="La contraseña actual no es correcta")
     if payload.current_password == payload.new_password:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="La nueva contraseña debe ser diferente"
-        )
+        raise HTTPException(status_code=422, detail="La nueva contraseña debe ser diferente")
 
     user.password_hash = hash_password(payload.new_password)
     user.must_change_password = False
     database.commit()
-
     return {"status": "ok"}
 
 
@@ -434,19 +347,14 @@ def users_page(request: Request):
 
 
 @router.get("/api/users")
-def list_users(
-    database: Session = Depends(get_database)
-):
+def list_users(database: Session = Depends(get_database)):
     users = database.scalars(
         select(User).order_by(User.id.asc())
     ).all()
     return [user_to_dict(user) for user in users]
 
 
-@router.post(
-    "/api/users",
-    status_code=status.HTTP_201_CREATED
-)
+@router.post("/api/users", status_code=status.HTTP_201_CREATED)
 def create_user(
     payload: UserCreatePayload,
     database: Session = Depends(get_database)
@@ -457,10 +365,7 @@ def create_user(
     if database.scalar(
         select(User).where(func.lower(User.username) == username)
     ) is not None:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="El nombre de usuario ya existe"
-        )
+        raise HTTPException(status_code=409, detail="El nombre de usuario ya existe")
 
     user = User(
         username=username,
@@ -471,17 +376,12 @@ def create_user(
         must_change_password=True
     )
     database.add(user)
-
     try:
         database.commit()
         database.refresh(user)
     except IntegrityError as error:
         database.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="No se pudo crear el usuario"
-        ) from error
-
+        raise HTTPException(status_code=409, detail="No se pudo crear el usuario") from error
     return user_to_dict(user)
 
 
@@ -494,25 +394,16 @@ def update_user(
 ):
     user = database.get(User, user_id)
     if user is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Usuario no encontrado"
-        )
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
 
     new_role = _normalize_role(payload.role)
     current_user = request.state.user
 
     if user.id == current_user.id:
         if not payload.active:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="No puede desactivar su propio usuario"
-            )
+            raise HTTPException(status_code=409, detail="No puede desactivar su propio usuario")
         if new_role != "ADMIN":
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="No puede quitarse a sí mismo el rol ADMIN"
-            )
+            raise HTTPException(status_code=409, detail="No puede quitarse a sí mismo el rol ADMIN")
 
     if (
         user.role == "ADMIN"
@@ -520,17 +411,13 @@ def update_user(
         and (new_role != "ADMIN" or not payload.active)
         and _active_admin_count(database) <= 1
     ):
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Debe existir al menos un administrador activo"
-        )
+        raise HTTPException(status_code=409, detail="Debe existir al menos un administrador activo")
 
     user.full_name = payload.full_name.strip()
     user.role = new_role
     user.active = payload.active
     database.commit()
     database.refresh(user)
-
     return user_to_dict(user)
 
 
@@ -542,30 +429,15 @@ def toggle_user(
 ):
     user = database.get(User, user_id)
     if user is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Usuario no encontrado"
-        )
-
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
     if user.id == request.state.user.id:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="No puede desactivar su propio usuario"
-        )
-
+        raise HTTPException(status_code=409, detail="No puede desactivar su propio usuario")
     if user.role == "ADMIN" and user.active and _active_admin_count(database) <= 1:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Debe existir al menos un administrador activo"
-        )
+        raise HTTPException(status_code=409, detail="Debe existir al menos un administrador activo")
 
     user.active = not user.active
     database.commit()
-
-    return {
-        "status": "ok",
-        "active": user.active
-    }
+    return {"status": "ok", "active": user.active}
 
 
 @router.post("/api/users/{user_id}/reset-password")
@@ -576,13 +448,9 @@ def reset_user_password(
 ):
     user = database.get(User, user_id)
     if user is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Usuario no encontrado"
-        )
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
 
     user.password_hash = hash_password(payload.password)
     user.must_change_password = True
     database.commit()
-
     return {"status": "ok"}
