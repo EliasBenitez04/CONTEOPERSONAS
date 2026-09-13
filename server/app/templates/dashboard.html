@@ -1,162 +1,74 @@
 <!doctype html>
 <html lang="es">
 <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Sistema Cámara - Dashboard</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
-    <style>
-        :root { --sidebar-width: 245px; }
-        body { background: #f4f6f9; color: #1f2937; }
-        .sidebar { width: var(--sidebar-width); min-height: 100vh; position: fixed; inset: 0 auto 0 0; background: #111827; color: #fff; padding: 22px 16px; display:flex; flex-direction:column; }
-        .brand { font-weight: 700; font-size: 1.1rem; margin-bottom: 28px; }
-        .sidebar .nav-link { color: #cbd5e1; border-radius: 10px; margin-bottom: 6px; }
-        .sidebar .nav-link.active, .sidebar .nav-link:hover { background: #1f2937; color: #fff; }
-        .user-box { margin-top:auto; padding-top:18px; border-top:1px solid #374151; }
-        .main { margin-left: var(--sidebar-width); padding: 24px; }
-        .metric-card, .panel-card { border: 0; border-radius: 16px; box-shadow: 0 4px 18px rgba(15, 23, 42, .06); }
-        .metric-icon { width: 46px; height: 46px; border-radius: 12px; display: grid; place-items: center; font-size: 1.25rem; }
-        .metric-value { font-size: 2rem; font-weight: 700; line-height: 1; }
-        .status-dot { width: 10px; height: 10px; border-radius: 999px; display: inline-block; margin-right: 7px; }
-        .online { background: #22c55e; }
-        .offline { background: #ef4444; }
-        @media (max-width: 991px) { .sidebar { position: static; width: 100%; min-height: auto; } .user-box{margin-top:15px}.main { margin-left: 0; } }
-    </style>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Sistema Cámara - Dashboard</title>
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<style>
+:root{--sidebar-width:245px}body{background:#f4f6f9;color:#1f2937}.sidebar{width:var(--sidebar-width);min-height:100vh;position:fixed;inset:0 auto 0 0;background:#111827;color:#fff;padding:22px 16px;display:flex;flex-direction:column}.brand{font-weight:700;font-size:1.1rem;margin-bottom:28px}.sidebar .nav-link{color:#cbd5e1;border-radius:10px;margin-bottom:6px}.sidebar .nav-link.active,.sidebar .nav-link:hover{background:#1f2937;color:#fff}.user-box{margin-top:auto;padding-top:18px;border-top:1px solid #374151}.main{margin-left:var(--sidebar-width);padding:24px}.metric-card,.panel-card{border:0;border-radius:16px;box-shadow:0 4px 18px rgba(15,23,42,.06)}.metric-icon{width:46px;height:46px;border-radius:12px;display:grid;place-items:center;font-size:1.25rem}.metric-value{font-size:2rem;font-weight:700;line-height:1}.status-dot{width:10px;height:10px;border-radius:999px;display:inline-block;margin-right:7px}.online{background:#22c55e}.offline{background:#ef4444}.insight-value{font-size:1.15rem;font-weight:700}@media(max-width:991px){.sidebar{position:static;width:100%;min-height:auto}.user-box{margin-top:15px}.main{margin-left:0}}
+</style>
 </head>
 <body>
 <aside class="sidebar">
-    <div class="brand"><i class="bi bi-camera-video me-2"></i>SISTEMA CÁMARA</div>
-    <nav class="nav flex-column">
-        <a class="nav-link active" href="/dashboard"><i class="bi bi-grid me-2"></i>Dashboard</a>
-        {% if request.state.user.role == 'ADMIN' %}
-        <a class="nav-link" href="/admin/branches"><i class="bi bi-building me-2"></i>Sucursales</a>
-        <a class="nav-link" href="/admin/cameras"><i class="bi bi-camera-video me-2"></i>Cámaras</a>
-        {% endif %}
-        <a class="nav-link" href="/reports"><i class="bi bi-bar-chart-line me-2"></i>Reportes</a>
-        {% if request.state.user.role == 'ADMIN' %}
-        <a class="nav-link" href="/users"><i class="bi bi-people me-2"></i>Usuarios</a>
-        <a class="nav-link" href="/docs" target="_blank"><i class="bi bi-braces me-2"></i>API / Swagger</a>
-        {% endif %}
-    </nav>
-    <div class="user-box">
-        <div class="small text-secondary">Sesión</div>
-        <div class="fw-semibold">{{ request.state.user.full_name }}</div>
-        <div class="small text-secondary mb-2">{{ request.state.user.role }}</div>
-        <a class="nav-link px-0" href="/change-password"><i class="bi bi-key me-2"></i>Cambiar clave</a>
-        <a class="nav-link px-0" href="/logout"><i class="bi bi-box-arrow-left me-2"></i>Cerrar sesión</a>
-    </div>
+<div class="brand"><i class="bi bi-camera-video me-2"></i>SISTEMA CÁMARA</div>
+<nav class="nav flex-column">
+<a class="nav-link active" href="/dashboard"><i class="bi bi-grid me-2"></i>Dashboard</a>
+{% if request.state.user.role == 'ADMIN' %}
+<a class="nav-link" href="/admin/branches"><i class="bi bi-building me-2"></i>Sucursales</a>
+<a class="nav-link" href="/admin/cameras"><i class="bi bi-camera-video me-2"></i>Cámaras</a>
+<a class="nav-link" href="/admin/clients"><i class="bi bi-pc-display me-2"></i>Clientes</a>
+{% endif %}
+{% if request.state.user.role in ['ADMIN','SUPERVISOR'] %}
+<a class="nav-link" href="/reports"><i class="bi bi-bar-chart-line me-2"></i>Reportes</a>
+{% endif %}
+{% if request.state.user.role == 'ADMIN' %}
+<a class="nav-link" href="/users"><i class="bi bi-people me-2"></i>Usuarios</a>
+<a class="nav-link" href="/admin/audit"><i class="bi bi-journal-text me-2"></i>Auditoría</a>
+{% if request.app.docs_url %}<a class="nav-link" href="/docs" target="_blank"><i class="bi bi-braces me-2"></i>API / Swagger</a>{% endif %}
+{% endif %}
+</nav>
+<div class="user-box"><div class="small text-secondary">Sesión</div><div class="fw-semibold">{{ request.state.user.full_name }}</div><div class="small text-secondary mb-2">{{ request.state.user.role }}</div><a class="nav-link px-0" href="/change-password"><i class="bi bi-key me-2"></i>Cambiar clave</a><a class="nav-link px-0" href="/logout"><i class="bi bi-box-arrow-left me-2"></i>Cerrar sesión</a></div>
 </aside>
 
 <main class="main">
-    <div id="forbiddenAlert" class="alert alert-warning d-none">No tiene permisos para acceder a esa sección.</div>
-    <div class="d-flex flex-column flex-lg-row justify-content-between align-items-lg-center gap-3 mb-4">
-        <div>
-            <h2 class="mb-1">Dashboard de Conteo</h2>
-            <div class="text-secondary">Monitoreo central de sucursales y cámaras</div>
-        </div>
-        <div class="d-flex gap-2 align-items-center">
-            <select id="branchSelect" class="form-select" style="min-width:220px">
-                <option value="">Todas las sucursales</option>
-                {% for branch in branches %}
-                <option value="{{ branch.id }}">{{ branch.name }}</option>
-                {% endfor %}
-            </select>
-            <button id="refreshButton" class="btn btn-dark"><i class="bi bi-arrow-clockwise"></i></button>
-        </div>
-    </div>
+<div id="forbiddenAlert" class="alert alert-warning d-none">No tiene permisos para acceder a esa sección.</div>
+<div class="d-flex flex-column flex-lg-row justify-content-between align-items-lg-center gap-3 mb-4"><div><h2 class="mb-1">Dashboard de Conteo</h2><div class="text-secondary">Monitoreo central de sucursales, cámaras y clientes</div></div><div class="d-flex gap-2 align-items-center"><select id="branchSelect" class="form-select" style="min-width:220px"><option value="">Todas las sucursales</option>{% for branch in branches %}<option value="{{ branch.id }}">{{ branch.name }}</option>{% endfor %}</select><button id="refreshButton" class="btn btn-dark"><i class="bi bi-arrow-clockwise"></i></button></div></div>
 
-    <div class="row g-3 mb-4">
-        <div class="col-12 col-md-6 col-xl-3"><div class="card metric-card h-100"><div class="card-body d-flex justify-content-between align-items-center"><div><div class="text-secondary small mb-2">ENTRADAS HOY</div><div id="entriesValue" class="metric-value">0</div></div><div class="metric-icon bg-success-subtle text-success"><i class="bi bi-box-arrow-in-right"></i></div></div></div></div>
-        <div class="col-12 col-md-6 col-xl-3"><div class="card metric-card h-100"><div class="card-body d-flex justify-content-between align-items-center"><div><div class="text-secondary small mb-2">SALIDAS HOY</div><div id="exitsValue" class="metric-value">0</div></div><div class="metric-icon bg-danger-subtle text-danger"><i class="bi bi-box-arrow-right"></i></div></div></div></div>
-        <div class="col-12 col-md-6 col-xl-3"><div class="card metric-card h-100"><div class="card-body d-flex justify-content-between align-items-center"><div><div class="text-secondary small mb-2">PERSONAS DENTRO</div><div id="insideValue" class="metric-value">0</div></div><div class="metric-icon bg-warning-subtle text-warning"><i class="bi bi-people"></i></div></div></div></div>
-        <div class="col-12 col-md-6 col-xl-3"><div class="card metric-card h-100"><div class="card-body d-flex justify-content-between align-items-center"><div><div class="text-secondary small mb-2">CÁMARAS ONLINE</div><div id="onlineValue" class="metric-value">0 / 0</div></div><div class="metric-icon bg-primary-subtle text-primary"><i class="bi bi-camera-video"></i></div></div></div></div>
-    </div>
+<div class="row g-3 mb-4">
+<div class="col-12 col-md-6 col-xl-3"><div class="card metric-card h-100"><div class="card-body d-flex justify-content-between align-items-center"><div><div class="text-secondary small mb-2">ENTRADAS HOY</div><div id="entriesValue" class="metric-value">0</div></div><div class="metric-icon bg-success-subtle text-success"><i class="bi bi-box-arrow-in-right"></i></div></div></div></div>
+<div class="col-12 col-md-6 col-xl-3"><div class="card metric-card h-100"><div class="card-body d-flex justify-content-between align-items-center"><div><div class="text-secondary small mb-2">SALIDAS HOY</div><div id="exitsValue" class="metric-value">0</div></div><div class="metric-icon bg-danger-subtle text-danger"><i class="bi bi-box-arrow-right"></i></div></div></div></div>
+<div class="col-12 col-md-6 col-xl-3"><div class="card metric-card h-100"><div class="card-body d-flex justify-content-between align-items-center"><div><div class="text-secondary small mb-2">PERSONAS DENTRO</div><div id="insideValue" class="metric-value">0</div></div><div class="metric-icon bg-warning-subtle text-warning"><i class="bi bi-people"></i></div></div></div></div>
+<div class="col-12 col-md-6 col-xl-3"><div class="card metric-card h-100"><div class="card-body d-flex justify-content-between align-items-center"><div><div class="text-secondary small mb-2">CÁMARAS ONLINE</div><div id="onlineValue" class="metric-value">0 / 0</div></div><div class="metric-icon bg-primary-subtle text-primary"><i class="bi bi-camera-video"></i></div></div></div></div>
+</div>
 
-    <div class="row g-3 mb-4">
-        <div class="col-12 col-xl-8">
-            <div class="card panel-card h-100">
-                <div class="card-header bg-white border-0 pt-4 px-4 d-flex justify-content-between align-items-center"><h5 class="mb-0">Movimiento por hora</h5><span id="updatedAt" class="small text-secondary"></span></div>
-                <div class="card-body px-4 pb-4"><canvas id="hourlyChart" height="110"></canvas></div>
-            </div>
-        </div>
-        <div class="col-12 col-xl-4">
-            <div class="card panel-card h-100">
-                <div class="card-header bg-white border-0 pt-4 px-4"><h5 class="mb-0">Estado de cámaras</h5></div>
-                <div id="cameraList" class="card-body px-4 pb-4"><div class="text-secondary">Sin cámaras registradas.</div></div>
-            </div>
-        </div>
-    </div>
+<div class="row g-3 mb-4">
+<div class="col-12 col-md-6 col-xl-3"><div class="card panel-card h-100"><div class="card-body"><div class="text-secondary small">CLIENTES ONLINE</div><div id="clientsOnline" class="insight-value mt-2">0 / 0</div></div></div></div>
+<div class="col-12 col-md-6 col-xl-3"><div class="card panel-card h-100"><div class="card-body"><div class="text-secondary small">EVENTOS PENDIENTES</div><div id="pendingEvents" class="insight-value mt-2">0</div><div id="clientErrors" class="small text-secondary mt-1"></div></div></div></div>
+<div class="col-12 col-md-6 col-xl-3"><div class="card panel-card h-100"><div class="card-body"><div class="text-secondary small">HORA PICO</div><div id="peakHour" class="insight-value mt-2">-</div><div id="peakTraffic" class="small text-secondary mt-1"></div></div></div></div>
+<div class="col-12 col-md-6 col-xl-3"><div class="card panel-card h-100"><div class="card-body"><div class="text-secondary small">MAYOR TRÁFICO</div><div id="busiestBranch" class="insight-value mt-2">-</div><div id="busiestTraffic" class="small text-secondary mt-1"></div></div></div></div>
+</div>
 
-    <div class="card panel-card">
-        <div class="card-header bg-white border-0 pt-4 px-4"><h5 class="mb-0">Últimos eventos de hoy</h5></div>
-        <div class="card-body p-0"><div class="table-responsive"><table class="table table-hover mb-0">
-            <thead class="table-light"><tr><th class="ps-4">Hora</th><th>Sucursal</th><th>Cámara</th><th>Tipo</th><th>Track ID</th></tr></thead>
-            <tbody id="eventsTable"><tr><td colspan="5" class="text-center text-secondary py-4">Sin eventos.</td></tr></tbody>
-        </table></div></div>
-    </div>
+<div class="row g-3 mb-4"><div class="col-12 col-xl-8"><div class="card panel-card h-100"><div class="card-header bg-white border-0 pt-4 px-4 d-flex justify-content-between align-items-center"><h5 class="mb-0">Movimiento por hora</h5><span id="updatedAt" class="small text-secondary"></span></div><div class="card-body px-4 pb-4"><canvas id="hourlyChart" height="110"></canvas></div></div></div><div class="col-12 col-xl-4"><div class="card panel-card h-100"><div class="card-header bg-white border-0 pt-4 px-4"><h5 class="mb-0">Estado de cámaras</h5></div><div id="cameraList" class="card-body px-4 pb-4"><div class="text-secondary">Sin cámaras registradas.</div></div></div></div></div>
+
+{% if request.state.user.role == 'ADMIN' %}
+<div class="card panel-card mb-4"><div class="card-header bg-white border-0 pt-4 px-4"><h5 class="mb-0">Salud de clientes instalados</h5></div><div id="clientList" class="card-body px-4 pb-4"><div class="text-secondary">Sin clientes registrados.</div></div></div>
+{% endif %}
+
+<div class="card panel-card"><div class="card-header bg-white border-0 pt-4 px-4"><h5 class="mb-0">Últimos eventos de hoy</h5></div><div class="card-body p-0"><div class="table-responsive"><table class="table table-hover mb-0"><thead class="table-light"><tr><th class="ps-4">Hora</th><th>Sucursal</th><th>Cámara</th><th>Tipo</th><th>Track ID</th></tr></thead><tbody id="eventsTable"><tr><td colspan="5" class="text-center text-secondary py-4">Sin eventos.</td></tr></tbody></table></div></div></div>
 </main>
 
 <script>
-    const branchSelect = document.getElementById('branchSelect');
-    if (new URLSearchParams(window.location.search).get('forbidden') === '1') {
-        document.getElementById('forbiddenAlert').classList.remove('d-none');
-        history.replaceState({}, '', '/dashboard');
-    }
-    const chart = new Chart(document.getElementById('hourlyChart'), {
-        type: 'line',
-        data: { labels: [], datasets: [
-            { label: 'Entradas', data: [], borderColor: '#16a34a', backgroundColor: 'rgba(22,163,74,.12)', tension: .3, fill: true },
-            { label: 'Salidas', data: [], borderColor: '#dc2626', backgroundColor: 'rgba(220,38,38,.08)', tension: .3, fill: true }
-        ]},
-        options: { responsive: true, maintainAspectRatio: true, scales: { y: { beginAtZero: true, ticks: { precision: 0 } } } }
-    });
-
-    function escapeHtml(value) { return String(value ?? '').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'",'&#039;'); }
-    function formatTime(value) { if (!value) return '-'; return new Date(value).toLocaleTimeString('es-PY', { hour:'2-digit', minute:'2-digit', second:'2-digit' }); }
-
-    function renderCameras(cameras) {
-        const container = document.getElementById('cameraList');
-        if (!cameras.length) { container.innerHTML = '<div class="text-secondary">Sin cámaras registradas.</div>'; return; }
-        container.innerHTML = cameras.map(camera => `<div class="d-flex justify-content-between align-items-center border-bottom py-3"><div><div class="fw-semibold">${escapeHtml(camera.name)}</div><div class="small text-secondary">${escapeHtml(camera.branch_name)}</div></div><div class="text-end"><div class="fw-semibold ${camera.online ? 'text-success':'text-danger'}"><span class="status-dot ${camera.online ? 'online':'offline'}"></span>${camera.online ? 'ONLINE':'OFFLINE'}</div><div class="small text-secondary">${camera.last_seen_at ? formatTime(camera.last_seen_at) : 'Sin conexión'}</div></div></div>`).join('');
-    }
-
-    function renderEvents(events) {
-        const tbody = document.getElementById('eventsTable');
-        if (!events.length) { tbody.innerHTML = '<tr><td colspan="5" class="text-center text-secondary py-4">Sin eventos de hoy.</td></tr>'; return; }
-        tbody.innerHTML = events.map(event => `<tr><td class="ps-4">${formatTime(event.occurred_at)}</td><td>${escapeHtml(event.branch_name)}</td><td>${escapeHtml(event.camera_name)}</td><td><span class="badge ${event.event_type === 'IN' ? 'text-bg-success':'text-bg-danger'}">${event.event_type}</span></td><td>${event.track_id ?? '-'}</td></tr>`).join('');
-    }
-
-    async function loadDashboard() {
-        const query = branchSelect.value ? `?branch_id=${encodeURIComponent(branchSelect.value)}` : '';
-        try {
-            const response = await fetch(`/api/dashboard-data${query}`);
-            if (response.status === 401) { window.location.href='/login'; return; }
-            if (response.status === 403) { window.location.href='/change-password'; return; }
-            if (!response.ok) throw new Error(`HTTP ${response.status}`);
-            const data = await response.json();
-            document.getElementById('entriesValue').textContent = data.totals.entries;
-            document.getElementById('exitsValue').textContent = data.totals.exits;
-            document.getElementById('insideValue').textContent = data.totals.inside;
-            document.getElementById('onlineValue').textContent = `${data.totals.cameras_online} / ${data.totals.cameras}`;
-            document.getElementById('updatedAt').textContent = `Actualizado ${formatTime(data.updated_at)}`;
-            chart.data.labels = data.hourly.labels;
-            chart.data.datasets[0].data = data.hourly.in;
-            chart.data.datasets[1].data = data.hourly.out;
-            chart.update();
-            renderCameras(data.cameras);
-            renderEvents(data.recent_events);
-        } catch (error) {
-            console.error(error);
-            document.getElementById('updatedAt').textContent = 'Error de conexión';
-        }
-    }
-
-    branchSelect.addEventListener('change', loadDashboard);
-    document.getElementById('refreshButton').addEventListener('click', loadDashboard);
-    loadDashboard();
-    setInterval(loadDashboard, 10000);
+const branchSelect=document.getElementById('branchSelect');
+if(new URLSearchParams(location.search).get('forbidden')==='1'){document.getElementById('forbiddenAlert').classList.remove('d-none');history.replaceState({},'','/dashboard')}
+const chart=new Chart(document.getElementById('hourlyChart'),{type:'line',data:{labels:[],datasets:[{label:'Entradas',data:[],borderColor:'#16a34a',backgroundColor:'rgba(22,163,74,.12)',tension:.3,fill:true},{label:'Salidas',data:[],borderColor:'#dc2626',backgroundColor:'rgba(220,38,38,.08)',tension:.3,fill:true}]},options:{responsive:true,maintainAspectRatio:true,scales:{y:{beginAtZero:true,ticks:{precision:0}}}}});
+function esc(v){return String(v??'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'",'&#039;')}
+function time(v){return v?new Date(v).toLocaleTimeString('es-PY',{hour:'2-digit',minute:'2-digit',second:'2-digit'}):'-'}
+function cameras(rows){const c=document.getElementById('cameraList');if(!rows.length){c.innerHTML='<div class="text-secondary">Sin cámaras registradas.</div>';return}c.innerHTML=rows.map(x=>`<div class="d-flex justify-content-between align-items-center border-bottom py-3"><div><div class="fw-semibold">${esc(x.name)}</div><div class="small text-secondary">${esc(x.branch_name)}</div></div><div class="text-end"><div class="fw-semibold ${x.online?'text-success':'text-danger'}"><span class="status-dot ${x.online?'online':'offline'}"></span>${x.online?'ONLINE':'OFFLINE'}</div><div class="small text-secondary">${x.last_seen_at?time(x.last_seen_at):'Sin conexión'}</div></div></div>`).join('')}
+function clients(rows){const c=document.getElementById('clientList');if(!c)return;if(!rows.length){c.innerHTML='<div class="text-secondary">Sin clientes registrados.</div>';return}c.innerHTML=rows.map(x=>`<div class="row align-items-center border-bottom py-2"><div class="col-md-4"><strong>${esc(x.camera_name)}</strong><div class="small text-secondary">${esc(x.branch_name)}</div></div><div class="col-md-2"><span class="badge ${x.online?'text-bg-success':'text-bg-danger'}">${x.online?'ONLINE':'OFFLINE'}</span></div><div class="col-md-2">v${esc(x.app_version||'-')}</div><div class="col-md-2">Pendientes: <strong>${x.pending_events}</strong></div><div class="col-md-2 ${x.last_error?'text-danger':'text-success'}">${x.last_error?'Con error':'OK'}</div></div>`).join('')}
+function events(rows){const b=document.getElementById('eventsTable');if(!rows.length){b.innerHTML='<tr><td colspan="5" class="text-center text-secondary py-4">Sin eventos de hoy.</td></tr>';return}b.innerHTML=rows.map(x=>`<tr><td class="ps-4">${time(x.occurred_at)}</td><td>${esc(x.branch_name)}</td><td>${esc(x.camera_name)}</td><td><span class="badge ${x.event_type==='IN'?'text-bg-success':'text-bg-danger'}">${x.event_type}</span></td><td>${x.track_id??'-'}</td></tr>`).join('')}
+async function load(){const q=branchSelect.value?`?branch_id=${encodeURIComponent(branchSelect.value)}`:'';try{const r=await fetch(`/api/dashboard-data${q}`);if(r.status===401){location.href='/login';return}if(!r.ok)throw new Error(`HTTP ${r.status}`);const d=await r.json();entriesValue.textContent=d.totals.entries;exitsValue.textContent=d.totals.exits;insideValue.textContent=d.totals.inside;onlineValue.textContent=`${d.totals.cameras_online} / ${d.totals.cameras}`;clientsOnline.textContent=`${d.totals.clients_online} / ${d.totals.clients}`;pendingEvents.textContent=d.totals.pending_events;clientErrors.textContent=d.totals.clients_with_errors?`${d.totals.clients_with_errors} cliente(s) con error`:'Sin errores reportados';peakHour.textContent=d.insights.peak_hour||'-';peakTraffic.textContent=d.insights.peak_hour?`${d.insights.peak_hour_traffic} movimientos`:'Sin datos';busiestBranch.textContent=d.insights.busiest_branch?.branch_name||'-';busiestTraffic.textContent=d.insights.busiest_branch?`${d.insights.busiest_branch.traffic} movimientos`:'Sin datos';updatedAt.textContent=`Actualizado ${time(d.updated_at)}`;chart.data.labels=d.hourly.labels;chart.data.datasets[0].data=d.hourly.in;chart.data.datasets[1].data=d.hourly.out;chart.update();cameras(d.cameras);clients(d.clients);events(d.recent_events)}catch(e){console.error(e);updatedAt.textContent='Error de conexión'}}
+branchSelect.onchange=load;document.getElementById('refreshButton').onclick=load;load();setInterval(load,10000);
 </script>
-</body>
-</html>
+</body></html>
