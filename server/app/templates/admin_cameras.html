@@ -1,0 +1,264 @@
+<!doctype html>
+<html lang="es">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Sistema Cámara - Cámaras</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+    <style>
+        :root { --sidebar-width: 245px; }
+        body { background: #f4f6f9; color: #1f2937; }
+        .sidebar { width: var(--sidebar-width); min-height: 100vh; position: fixed; inset: 0 auto 0 0; background: #111827; color: #fff; padding: 22px 16px; }
+        .brand { font-weight: 700; font-size: 1.1rem; margin-bottom: 28px; }
+        .sidebar .nav-link { color: #cbd5e1; border-radius: 10px; margin-bottom: 6px; }
+        .sidebar .nav-link.active, .sidebar .nav-link:hover { background: #1f2937; color: #fff; }
+        .main { margin-left: var(--sidebar-width); padding: 24px; }
+        .panel-card { border: 0; border-radius: 16px; box-shadow: 0 4px 18px rgba(15, 23, 42, .06); }
+        .status-dot { width: 9px; height: 9px; border-radius: 999px; display: inline-block; margin-right: 7px; }
+        .online { background: #22c55e; }
+        .offline { background: #ef4444; }
+        @media (max-width: 991px) { .sidebar { position: static; width: 100%; min-height: auto; } .main { margin-left: 0; } }
+    </style>
+</head>
+<body>
+<aside class="sidebar">
+    <div class="brand"><i class="bi bi-camera-video me-2"></i>SISTEMA CÁMARA</div>
+    <nav class="nav flex-column">
+        <a class="nav-link" href="/dashboard"><i class="bi bi-grid me-2"></i>Dashboard</a>
+        <a class="nav-link" href="/admin/branches"><i class="bi bi-building me-2"></i>Sucursales</a>
+        <a class="nav-link active" href="/admin/cameras"><i class="bi bi-camera-video me-2"></i>Cámaras</a>
+        <a class="nav-link" href="/docs" target="_blank"><i class="bi bi-braces me-2"></i>API / Swagger</a>
+    </nav>
+</aside>
+
+<main class="main">
+    <div class="d-flex flex-column flex-lg-row justify-content-between align-items-lg-center gap-3 mb-4">
+        <div>
+            <h2 class="mb-1">Cámaras</h2>
+            <div class="text-secondary">Administración y estado de las cámaras por sucursal</div>
+        </div>
+        <div class="d-flex gap-2">
+            <select id="branchFilter" class="form-select" style="min-width: 210px;">
+                <option value="">Todas las sucursales</option>
+                {% for branch in branches %}
+                <option value="{{ branch.id }}">{{ branch.name }}</option>
+                {% endfor %}
+            </select>
+            <button class="btn btn-dark" id="newButton"><i class="bi bi-plus-lg me-1"></i>Nueva cámara</button>
+        </div>
+    </div>
+
+    <div id="alertContainer"></div>
+
+    <div class="card panel-card">
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table table-hover mb-0">
+                    <thead class="table-light">
+                    <tr>
+                        <th class="ps-4">ID</th>
+                        <th>Cámara</th>
+                        <th>Sucursal</th>
+                        <th>Conexión</th>
+                        <th>Último heartbeat</th>
+                        <th>Eventos</th>
+                        <th>Estado</th>
+                        <th class="text-end pe-4">Acciones</th>
+                    </tr>
+                    </thead>
+                    <tbody id="cameraTable">
+                    <tr><td colspan="8" class="text-center text-secondary py-4">Cargando...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</main>
+
+<div class="modal fade" id="cameraModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content border-0 shadow">
+            <div class="modal-header">
+                <h5 class="modal-title" id="modalTitle">Nueva cámara</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form id="cameraForm">
+                <div class="modal-body">
+                    <input type="hidden" id="editingId">
+                    <div class="mb-3">
+                        <label for="cameraName" class="form-label">Nombre de cámara</label>
+                        <input type="text" maxlength="100" class="form-control" id="cameraName" required>
+                        <div class="form-text">Debe coincidir con CAMERA_NAME en el cliente.</div>
+                    </div>
+                    <div class="mb-3">
+                        <label for="cameraBranch" class="form-label">Sucursal</label>
+                        <select class="form-select" id="cameraBranch" required>
+                            <option value="">Seleccione...</option>
+                            {% for branch in branches %}
+                            <option value="{{ branch.id }}">{{ branch.name }}</option>
+                            {% endfor %}
+                        </select>
+                        <div class="form-text">Una cámara con historial no puede moverse a otra sucursal.</div>
+                    </div>
+                    <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" id="cameraActive" checked>
+                        <label class="form-check-label" for="cameraActive">Cámara activa</label>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-light" data-bs-dismiss="modal">Cancelar</button>
+                    <button type="submit" class="btn btn-dark">Guardar</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+    const modal = new bootstrap.Modal(document.getElementById('cameraModal'));
+    let cameras = [];
+
+    function escapeHtml(value) {
+        return String(value ?? '')
+            .replaceAll('&', '&amp;').replaceAll('<', '&lt;')
+            .replaceAll('>', '&gt;').replaceAll('"', '&quot;')
+            .replaceAll("'", '&#039;');
+    }
+
+    function showAlert(message, type = 'success') {
+        document.getElementById('alertContainer').innerHTML = `
+            <div class="alert alert-${type} alert-dismissible fade show" role="alert">
+                ${escapeHtml(message)}
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            </div>`;
+    }
+
+    async function readError(response) {
+        try {
+            const data = await response.json();
+            return data.detail || 'Ocurrió un error.';
+        } catch (_) {
+            return `Error HTTP ${response.status}`;
+        }
+    }
+
+    function formatDate(value) {
+        if (!value) return 'Sin conexión';
+        return new Date(value).toLocaleString('es-PY', {
+            day: '2-digit', month: '2-digit', year: 'numeric',
+            hour: '2-digit', minute: '2-digit', second: '2-digit'
+        });
+    }
+
+    function renderCameras() {
+        const tbody = document.getElementById('cameraTable');
+        if (!cameras.length) {
+            tbody.innerHTML = '<tr><td colspan="8" class="text-center text-secondary py-4">No hay cámaras registradas.</td></tr>';
+            return;
+        }
+
+        tbody.innerHTML = cameras.map(camera => `
+            <tr>
+                <td class="ps-4 fw-semibold">${camera.id}</td>
+                <td>${escapeHtml(camera.name)}</td>
+                <td>${escapeHtml(camera.branch_name)}</td>
+                <td>
+                    <span class="status-dot ${camera.online ? 'online' : 'offline'}"></span>
+                    <span class="fw-semibold ${camera.online ? 'text-success' : 'text-danger'}">${camera.online ? 'ONLINE' : 'OFFLINE'}</span>
+                </td>
+                <td class="small">${escapeHtml(formatDate(camera.last_seen_at))}</td>
+                <td><span class="badge text-bg-light">${camera.event_count}</span></td>
+                <td><span class="badge ${camera.active ? 'text-bg-success' : 'text-bg-secondary'}">${camera.active ? 'ACTIVA' : 'INACTIVA'}</span></td>
+                <td class="text-end pe-4">
+                    <button class="btn btn-sm btn-outline-dark me-1" onclick="editCamera(${camera.id})"><i class="bi bi-pencil"></i></button>
+                    <button class="btn btn-sm ${camera.active ? 'btn-outline-warning' : 'btn-outline-success'}" onclick="toggleCamera(${camera.id})">
+                        <i class="bi ${camera.active ? 'bi-pause-circle' : 'bi-play-circle'}"></i>
+                        ${camera.active ? 'Desactivar' : 'Activar'}
+                    </button>
+                </td>
+            </tr>`).join('');
+    }
+
+    async function loadCameras() {
+        const branchId = document.getElementById('branchFilter').value;
+        const query = branchId ? `?branch_id=${encodeURIComponent(branchId)}` : '';
+        const response = await fetch(`/api/admin/cameras${query}`);
+        if (!response.ok) {
+            showAlert(await readError(response), 'danger');
+            return;
+        }
+        cameras = await response.json();
+        renderCameras();
+    }
+
+    function openNew() {
+        document.getElementById('cameraForm').reset();
+        document.getElementById('editingId').value = '';
+        document.getElementById('cameraActive').checked = true;
+        document.getElementById('modalTitle').textContent = 'Nueva cámara';
+        modal.show();
+    }
+
+    function editCamera(id) {
+        const camera = cameras.find(item => item.id === id);
+        if (!camera) return;
+        document.getElementById('editingId').value = camera.id;
+        document.getElementById('cameraName').value = camera.name;
+        document.getElementById('cameraBranch').value = String(camera.branch_id);
+        document.getElementById('cameraActive').checked = camera.active;
+        document.getElementById('modalTitle').textContent = 'Editar cámara';
+        modal.show();
+    }
+
+    async function toggleCamera(id) {
+        const camera = cameras.find(item => item.id === id);
+        if (!camera) return;
+        if (!confirm(`${camera.active ? 'Desactivar' : 'Activar'} la cámara ${camera.name}?`)) return;
+
+        const response = await fetch(`/api/admin/cameras/${id}/toggle`, { method: 'PATCH' });
+        if (!response.ok) {
+            showAlert(await readError(response), 'danger');
+            return;
+        }
+        showAlert('Estado de la cámara actualizado.');
+        await loadCameras();
+    }
+
+    document.getElementById('newButton').addEventListener('click', openNew);
+    document.getElementById('branchFilter').addEventListener('change', loadCameras);
+
+    document.getElementById('cameraForm').addEventListener('submit', async event => {
+        event.preventDefault();
+        const editingId = document.getElementById('editingId').value;
+        const payload = {
+            branch_id: Number(document.getElementById('cameraBranch').value),
+            name: document.getElementById('cameraName').value.trim(),
+            active: document.getElementById('cameraActive').checked
+        };
+
+        const url = editingId ? `/api/admin/cameras/${editingId}` : '/api/admin/cameras';
+        const method = editingId ? 'PUT' : 'POST';
+
+        const response = await fetch(url, {
+            method,
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+
+        if (!response.ok) {
+            showAlert(await readError(response), 'danger');
+            return;
+        }
+
+        modal.hide();
+        showAlert(editingId ? 'Cámara actualizada correctamente.' : 'Cámara creada correctamente.');
+        await loadCameras();
+    });
+
+    loadCameras();
+    setInterval(loadCameras, 10000);
+</script>
+</body>
+</html>
