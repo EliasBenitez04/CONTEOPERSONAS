@@ -18,18 +18,27 @@ class LineCounter:
         self.states = {}
         self.set_margin(margin)
 
+    @property
+    def margin(self):
+        return self._margin
+
+    @margin.setter
+    def margin(self, value):
+        self.set_margin(value)
+
     def set_margin(self, margin):
-        self.margin = max(6, int(margin))
+        self._margin = max(6, int(margin))
         self.crossing_margin = max(
             4.0,
-            self.margin * 0.28
+            self._margin * 0.28
         )
         self.rearm_margin = max(
             self.crossing_margin * 2.0,
-            self.margin * 0.65
+            self._margin * 0.65
         )
-        self.states.clear()
-        return self.margin
+        if hasattr(self, "states"):
+            self.states.clear()
+        return self._margin
 
     def signed_distance(self, point):
         px, py = point
