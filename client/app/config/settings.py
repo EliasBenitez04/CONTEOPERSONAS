@@ -1,11 +1,11 @@
 import os
-from pathlib import Path
 
 from dotenv import load_dotenv
 
+from app.paths import CLIENT_DIR
 
-BASE_DIR = Path(__file__).resolve().parents[2]
-ENV_FILE = BASE_DIR / ".env"
+
+ENV_FILE = CLIENT_DIR / ".env"
 load_dotenv(ENV_FILE)
 
 
@@ -22,22 +22,13 @@ class Settings:
         "http://127.0.0.1:8000/api"
     ).rstrip("/")
 
-    # V3: credenciales individuales por instalacion.
     CLIENT_ID = os.getenv("CLIENT_ID", "").strip()
     CLIENT_TOKEN = os.getenv("CLIENT_TOKEN", "").strip()
-
-    # Compatibilidad temporal con instalaciones V2.
     API_TOKEN = os.getenv("API_TOKEN", "").strip()
 
-    API_TIMEOUT_SECONDS = int(
-        os.getenv("API_TIMEOUT_SECONDS", "5")
-    )
-    SYNC_INTERVAL_SECONDS = int(
-        os.getenv("SYNC_INTERVAL_SECONDS", "5")
-    )
-    SYNC_BATCH_SIZE = int(
-        os.getenv("SYNC_BATCH_SIZE", "100")
-    )
+    API_TIMEOUT_SECONDS = int(os.getenv("API_TIMEOUT_SECONDS", "5"))
+    SYNC_INTERVAL_SECONDS = int(os.getenv("SYNC_INTERVAL_SECONDS", "5"))
+    SYNC_BATCH_SIZE = int(os.getenv("SYNC_BATCH_SIZE", "100"))
     HEARTBEAT_INTERVAL_SECONDS = int(
         os.getenv("HEARTBEAT_INTERVAL_SECONDS", "20")
     )
