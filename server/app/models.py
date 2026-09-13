@@ -73,14 +73,14 @@ class Camera(Base):
 
     branch: Mapped[Branch] = relationship(back_populates="cameras")
     events: Mapped[list["CountEvent"]] = relationship(back_populates="camera")
-    client: Mapped["ClientDevice | None"] = relationship(back_populates="camera", uselist=False)
+    client: Mapped["ClientDevice | None"] = relationship(
+        back_populates="camera",
+        uselist=False
+    )
 
 
 class ClientDevice(Base):
     __tablename__ = "client_devices"
-    __table_args__ = (
-        UniqueConstraint("camera_id", name="uq_client_devices_camera"),
-    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     client_id: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
@@ -104,7 +104,9 @@ class ClientDevice(Base):
     branch: Mapped[Branch] = relationship(back_populates="clients")
     camera: Mapped[Camera] = relationship(back_populates="client")
     config: Mapped["ClientConfig | None"] = relationship(
-        back_populates="client", uselist=False, cascade="all, delete-orphan"
+        back_populates="client",
+        uselist=False,
+        cascade="all, delete-orphan"
     )
 
 
@@ -122,7 +124,7 @@ class ClientConfig(Base):
     in_side: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     margin: Mapped[int] = mapped_column(Integer, nullable=False, default=18)
     confidence: Mapped[int] = mapped_column(Integer, nullable=False, default=22)
-    config_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    config_version: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
     )
