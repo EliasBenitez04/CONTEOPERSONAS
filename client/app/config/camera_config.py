@@ -1,8 +1,9 @@
 import json
-from pathlib import Path
+
+from app.paths import CLIENT_DIR
 
 
-CONFIG_FILE = Path(__file__).resolve().parents[2] / "data" / "camera_config.json"
+CONFIG_FILE = CLIENT_DIR / "data" / "camera_config.json"
 
 
 DEFAULT_CONFIG = {
@@ -13,35 +14,34 @@ DEFAULT_CONFIG = {
         "y2": 650
     },
     "in_side": 1,
-    "margin": 18
+    "margin": 18,
+    "confidence": 0.22,
+    "config_version": 0
 }
 
 
 def load_camera_config():
-
     if not CONFIG_FILE.exists():
         save_camera_config(DEFAULT_CONFIG)
         return DEFAULT_CONFIG.copy()
 
     with open(CONFIG_FILE, "r", encoding="utf-8") as file:
-        return json.load(file)
+        config = json.load(file)
+
+    merged = DEFAULT_CONFIG.copy()
+    merged.update(config)
+    merged["line"] = {
+        **DEFAULT_CONFIG["line"],
+        **config.get("line", {})
+    }
+    return merged
 
 
 def save_camera_config(config):
-
     CONFIG_FILE.parent.mkdir(
         parents=True,
         exist_ok=True
     )
 
-    with open(
-        CONFIG_FILE,
-        "w",
-        encoding="utf-8"
-    ) as file:
-
-        json.dump(
-            config,
-            file,
-            indent=4
-        )
+    with open(CONFIG_FILE, "w", encoding="utf-8") as file:
+        json.dump(config, file, indent=4)
