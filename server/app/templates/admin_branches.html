@@ -1,0 +1,247 @@
+<!doctype html>
+<html lang="es">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Sistema Cámara - Sucursales</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+    <style>
+        :root { --sidebar-width: 245px; }
+        body { background: #f4f6f9; color: #1f2937; }
+        .sidebar { width: var(--sidebar-width); min-height: 100vh; position: fixed; inset: 0 auto 0 0; background: #111827; color: #fff; padding: 22px 16px; }
+        .brand { font-weight: 700; font-size: 1.1rem; margin-bottom: 28px; }
+        .sidebar .nav-link { color: #cbd5e1; border-radius: 10px; margin-bottom: 6px; }
+        .sidebar .nav-link.active, .sidebar .nav-link:hover { background: #1f2937; color: #fff; }
+        .main { margin-left: var(--sidebar-width); padding: 24px; }
+        .panel-card { border: 0; border-radius: 16px; box-shadow: 0 4px 18px rgba(15, 23, 42, .06); }
+        .status-dot { width: 9px; height: 9px; border-radius: 999px; display: inline-block; margin-right: 7px; }
+        .active-dot { background: #22c55e; }
+        .inactive-dot { background: #94a3b8; }
+        @media (max-width: 991px) { .sidebar { position: static; width: 100%; min-height: auto; } .main { margin-left: 0; } }
+    </style>
+</head>
+<body>
+<aside class="sidebar">
+    <div class="brand"><i class="bi bi-camera-video me-2"></i>SISTEMA CÁMARA</div>
+    <nav class="nav flex-column">
+        <a class="nav-link" href="/dashboard"><i class="bi bi-grid me-2"></i>Dashboard</a>
+        <a class="nav-link active" href="/admin/branches"><i class="bi bi-building me-2"></i>Sucursales</a>
+        <a class="nav-link" href="/admin/cameras"><i class="bi bi-camera-video me-2"></i>Cámaras</a>
+        <a class="nav-link" href="/docs" target="_blank"><i class="bi bi-braces me-2"></i>API / Swagger</a>
+    </nav>
+</aside>
+
+<main class="main">
+    <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-3 mb-4">
+        <div>
+            <h2 class="mb-1">Sucursales</h2>
+            <div class="text-secondary">Administración de locales conectados al sistema central</div>
+        </div>
+        <button class="btn btn-dark" id="newButton"><i class="bi bi-plus-lg me-1"></i>Nueva sucursal</button>
+    </div>
+
+    <div id="alertContainer"></div>
+
+    <div class="card panel-card">
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table table-hover mb-0">
+                    <thead class="table-light">
+                    <tr>
+                        <th class="ps-4">ID</th>
+                        <th>Nombre</th>
+                        <th>Dirección</th>
+                        <th>Cámaras</th>
+                        <th>Estado</th>
+                        <th class="text-end pe-4">Acciones</th>
+                    </tr>
+                    </thead>
+                    <tbody id="branchTable">
+                    <tr><td colspan="6" class="text-center text-secondary py-4">Cargando...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</main>
+
+<div class="modal fade" id="branchModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content border-0 shadow">
+            <div class="modal-header">
+                <h5 class="modal-title" id="modalTitle">Nueva sucursal</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form id="branchForm">
+                <div class="modal-body">
+                    <input type="hidden" id="editingId">
+                    <div class="mb-3">
+                        <label for="branchId" class="form-label">ID de sucursal</label>
+                        <input type="number" min="1" class="form-control" id="branchId" required>
+                        <div class="form-text">Este ID debe coincidir con BRANCH_ID en el cliente de la sucursal.</div>
+                    </div>
+                    <div class="mb-3">
+                        <label for="branchName" class="form-label">Nombre</label>
+                        <input type="text" maxlength="120" class="form-control" id="branchName" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="branchAddress" class="form-label">Dirección</label>
+                        <input type="text" maxlength="255" class="form-control" id="branchAddress">
+                    </div>
+                    <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" id="branchActive" checked>
+                        <label class="form-check-label" for="branchActive">Sucursal activa</label>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-light" data-bs-dismiss="modal">Cancelar</button>
+                    <button type="submit" class="btn btn-dark">Guardar</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+    const modal = new bootstrap.Modal(document.getElementById('branchModal'));
+    let branches = [];
+
+    function escapeHtml(value) {
+        return String(value ?? '')
+            .replaceAll('&', '&amp;').replaceAll('<', '&lt;')
+            .replaceAll('>', '&gt;').replaceAll('"', '&quot;')
+            .replaceAll("'", '&#039;');
+    }
+
+    function showAlert(message, type = 'success') {
+        document.getElementById('alertContainer').innerHTML = `
+            <div class="alert alert-${type} alert-dismissible fade show" role="alert">
+                ${escapeHtml(message)}
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            </div>`;
+    }
+
+    async function readError(response) {
+        try {
+            const data = await response.json();
+            return data.detail || 'Ocurrió un error.';
+        } catch (_) {
+            return `Error HTTP ${response.status}`;
+        }
+    }
+
+    function renderBranches() {
+        const tbody = document.getElementById('branchTable');
+        if (!branches.length) {
+            tbody.innerHTML = '<tr><td colspan="6" class="text-center text-secondary py-4">No hay sucursales registradas.</td></tr>';
+            return;
+        }
+
+        tbody.innerHTML = branches.map(branch => `
+            <tr>
+                <td class="ps-4 fw-semibold">${branch.id}</td>
+                <td>${escapeHtml(branch.name)}</td>
+                <td>${escapeHtml(branch.address || '-')}</td>
+                <td><span class="badge text-bg-light">${branch.camera_count}</span></td>
+                <td>
+                    <span class="status-dot ${branch.active ? 'active-dot' : 'inactive-dot'}"></span>
+                    <span class="${branch.active ? 'text-success' : 'text-secondary'} fw-semibold">${branch.active ? 'ACTIVA' : 'INACTIVA'}</span>
+                </td>
+                <td class="text-end pe-4">
+                    <button class="btn btn-sm btn-outline-dark me-1" onclick="editBranch(${branch.id})"><i class="bi bi-pencil"></i></button>
+                    <button class="btn btn-sm ${branch.active ? 'btn-outline-warning' : 'btn-outline-success'}" onclick="toggleBranch(${branch.id})">
+                        <i class="bi ${branch.active ? 'bi-pause-circle' : 'bi-play-circle'}"></i>
+                        ${branch.active ? 'Desactivar' : 'Activar'}
+                    </button>
+                </td>
+            </tr>`).join('');
+    }
+
+    async function loadBranches() {
+        const response = await fetch('/api/admin/branches');
+        if (!response.ok) {
+            showAlert(await readError(response), 'danger');
+            return;
+        }
+        branches = await response.json();
+        renderBranches();
+    }
+
+    function openNew() {
+        document.getElementById('branchForm').reset();
+        document.getElementById('editingId').value = '';
+        document.getElementById('branchId').disabled = false;
+        document.getElementById('branchActive').checked = true;
+        document.getElementById('modalTitle').textContent = 'Nueva sucursal';
+        modal.show();
+    }
+
+    function editBranch(id) {
+        const branch = branches.find(item => item.id === id);
+        if (!branch) return;
+        document.getElementById('editingId').value = branch.id;
+        document.getElementById('branchId').value = branch.id;
+        document.getElementById('branchId').disabled = true;
+        document.getElementById('branchName').value = branch.name;
+        document.getElementById('branchAddress').value = branch.address || '';
+        document.getElementById('branchActive').checked = branch.active;
+        document.getElementById('modalTitle').textContent = 'Editar sucursal';
+        modal.show();
+    }
+
+    async function toggleBranch(id) {
+        const branch = branches.find(item => item.id === id);
+        if (!branch) return;
+        if (!confirm(`${branch.active ? 'Desactivar' : 'Activar'} la sucursal ${branch.name}?`)) return;
+
+        const response = await fetch(`/api/admin/branches/${id}/toggle`, { method: 'PATCH' });
+        if (!response.ok) {
+            showAlert(await readError(response), 'danger');
+            return;
+        }
+        showAlert('Estado de la sucursal actualizado.');
+        await loadBranches();
+    }
+
+    document.getElementById('newButton').addEventListener('click', openNew);
+
+    document.getElementById('branchForm').addEventListener('submit', async event => {
+        event.preventDefault();
+        const editingId = document.getElementById('editingId').value;
+        const payload = {
+            name: document.getElementById('branchName').value.trim(),
+            address: document.getElementById('branchAddress').value.trim() || null,
+            active: document.getElementById('branchActive').checked
+        };
+
+        let url = '/api/admin/branches';
+        let method = 'POST';
+        if (editingId) {
+            url = `/api/admin/branches/${editingId}`;
+            method = 'PUT';
+        } else {
+            payload.id = Number(document.getElementById('branchId').value);
+        }
+
+        const response = await fetch(url, {
+            method,
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+
+        if (!response.ok) {
+            showAlert(await readError(response), 'danger');
+            return;
+        }
+
+        modal.hide();
+        showAlert(editingId ? 'Sucursal actualizada correctamente.' : 'Sucursal creada correctamente.');
+        await loadBranches();
+    });
+
+    loadBranches();
+</script>
+</body>
+</html>
