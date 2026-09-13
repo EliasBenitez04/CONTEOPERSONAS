@@ -133,6 +133,15 @@ class EventSynchronizer:
         config = result.get("data") or {}
         version = int(config.get("config_version", 0))
 
+        if config.get("bootstrap_required"):
+            with self._config_lock:
+                self._pending_remote_config = config
+            print(
+                "[CONFIG] El servidor solicita adoptar la "
+                "configuracion local actual."
+            )
+            return
+
         if version <= self._remote_config_version:
             return
 
