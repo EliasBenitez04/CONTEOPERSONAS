@@ -6,6 +6,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import func, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from app.config import settings
 from app.database import Base, engine, get_database
@@ -34,7 +35,10 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title=settings.APP_NAME,
     version="3.0.0",
-    lifespan=lifespan
+    lifespan=lifespan,
+    docs_url="/docs" if settings.ENABLE_DOCS else None,
+    redoc_url="/redoc" if settings.ENABLE_DOCS else None,
+    openapi_url="/openapi.json" if settings.ENABLE_DOCS else None
 )
 
 
@@ -43,7 +47,6 @@ def verify_api_token(
 ):
     if not settings.API_TOKEN:
         return
-
     if (
         credentials is None
         or credentials.scheme.lower() != "bearer"
@@ -155,7 +158,6 @@ def health(database: Session = Depends(get_database)):
 def create_branch(payload: BranchCreate, database: Session = Depends(get_database)):
     if database.get(Branch, payload.id) is not None:
         raise HTTPException(status_code=409, detail="La sucursal ya existe")
-
     branch = Branch(
         id=payload.id,
         name=payload.name.strip(),
@@ -233,7 +235,6 @@ def list_cameras(
     ).all()
 
 
-# La identidad del cliente V3 tiene prioridad sobre branch_id/camera_name del payload.
 from app.machine import resolve_machine_auth
 
 
@@ -263,7 +264,6 @@ def create_count_event(
             raise HTTPException(status_code=403, detail="Sucursal del cliente inactiva")
         camera.last_seen_at = datetime.now(timezone.utc)
     else:
-        # Compatibilidad con cliente V2 durante la migracion.
         branch_id = payload.branch_id
         get_or_create_branch(database, branch_id)
         camera = get_or_create_camera(database, branch_id, payload.camera_name)
@@ -349,15 +349,21 @@ def count_summary(
 
 
 from app.admin import router as admin_router
+from app.audit import router as audit_router
 from app.auth import router as auth_router
 from app.dashboard import router as dashboard_router
 from app.machine import router as machine_router
 from app.reports import router as reports_router
 from app.security import WebAuthMiddleware
 
+app.add_middleware(
+    TrustedHostMiddleware,
+    allowed_hosts=settings.TRUSTED_HOSTS
+)
 app.add_middleware(WebAuthMiddleware)
 app.include_router(auth_router)
 app.include_router(dashboard_router)
 app.include_router(admin_router)
 app.include_router(machine_router)
 app.include_router(reports_router)
+app.include_router(audit_router)
