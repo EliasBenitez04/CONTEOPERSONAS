@@ -1,11 +1,11 @@
-import os
 import sys
 import threading
 from datetime import datetime
-from pathlib import Path
+
+from app.paths import CLIENT_DIR
 
 
-LOG_DIR = Path(__file__).resolve().parents[2] / "logs"
+LOG_DIR = CLIENT_DIR / "logs"
 LOG_FILE = LOG_DIR / "client.log"
 MAX_BYTES = 5 * 1024 * 1024
 MAX_FILES = 5
@@ -76,5 +76,4 @@ def setup_client_logging():
 
     sys.stdout = TeeStream(sys.stdout, handle)
     sys.stderr = TeeStream(sys.stderr, handle)
-
     return LOG_FILE
