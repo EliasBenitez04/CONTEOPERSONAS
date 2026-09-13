@@ -6,9 +6,9 @@ from pathlib import Path
 from queue import Queue
 
 from app.database.models import CountEvent
+from app.paths import CLIENT_DIR
 
 
-CLIENT_DIR = Path(__file__).resolve().parents[2]
 DATABASE_PATH = CLIENT_DIR / "data" / "local.db"
 
 
