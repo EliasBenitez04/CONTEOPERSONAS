@@ -33,7 +33,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title=settings.APP_NAME,
-    version="2.2.0",
+    version="2.3.0",
     lifespan=lifespan
 )
 
@@ -77,10 +77,7 @@ def get_or_create_branch(
     database: Session,
     branch_id: int
 ):
-    branch = database.get(
-        Branch,
-        branch_id
-    )
+    branch = database.get(Branch, branch_id)
 
     if branch is None:
         branch = Branch(
@@ -88,18 +85,13 @@ def get_or_create_branch(
             name=f"SUCURSAL_{branch_id}",
             active=True
         )
-
         database.add(branch)
-
         try:
             database.commit()
             database.refresh(branch)
         except IntegrityError:
             database.rollback()
-            branch = database.get(
-                Branch,
-                branch_id
-            )
+            branch = database.get(Branch, branch_id)
 
     if branch is None:
         raise HTTPException(
@@ -137,9 +129,7 @@ def get_or_create_camera(
             active=True,
             last_seen_at=datetime.now(timezone.utc)
         )
-
         database.add(camera)
-
         try:
             database.commit()
             database.refresh(camera)
@@ -171,10 +161,7 @@ def get_or_create_camera(
     return camera
 
 
-@app.get(
-    "/",
-    response_model=HealthResponse
-)
+@app.get("/", response_model=HealthResponse)
 def root():
     return {
         "status": "ok",
@@ -187,9 +174,7 @@ def root():
     f"{settings.API_PREFIX}/health",
     response_model=HealthResponse
 )
-def health(
-    database: Session = Depends(get_database)
-):
+def health(database: Session = Depends(get_database)):
     try:
         database.execute(text("SELECT 1"))
     except Exception as error:
@@ -215,11 +200,7 @@ def create_branch(
     payload: BranchCreate,
     database: Session = Depends(get_database)
 ):
-    existing = database.get(
-        Branch,
-        payload.id
-    )
-
+    existing = database.get(Branch, payload.id)
     if existing is not None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -229,14 +210,9 @@ def create_branch(
     branch = Branch(
         id=payload.id,
         name=payload.name.strip(),
-        address=(
-            payload.address.strip()
-            if payload.address
-            else None
-        ),
+        address=payload.address.strip() if payload.address else None,
         active=payload.active
     )
-
     database.add(branch)
 
     try:
@@ -257,13 +233,9 @@ def create_branch(
     response_model=list[BranchResponse],
     dependencies=[Depends(verify_api_token)]
 )
-def list_branches(
-    database: Session = Depends(get_database)
-):
+def list_branches(database: Session = Depends(get_database)):
     return database.scalars(
-        select(Branch).order_by(
-            Branch.id.asc()
-        )
+        select(Branch).order_by(Branch.id.asc())
     ).all()
 
 
@@ -277,11 +249,7 @@ def create_camera(
     payload: CameraCreate,
     database: Session = Depends(get_database)
 ):
-    branch = database.get(
-        Branch,
-        payload.branch_id
-    )
-
+    branch = database.get(Branch, payload.branch_id)
     if branch is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -294,7 +262,6 @@ def create_camera(
             Camera.name == payload.name.strip()
         )
     )
-
     if existing is not None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -306,7 +273,6 @@ def create_camera(
         name=payload.name.strip(),
         active=payload.active
     )
-
     database.add(camera)
 
     try:
@@ -332,17 +298,9 @@ def list_cameras(
     database: Session = Depends(get_database)
 ):
     query = select(Camera)
-
     if branch_id is not None:
-        query = query.where(
-            Camera.branch_id == branch_id
-        )
-
-    query = query.order_by(
-        Camera.branch_id.asc(),
-        Camera.id.asc()
-    )
-
+        query = query.where(Camera.branch_id == branch_id)
+    query = query.order_by(Camera.branch_id.asc(), Camera.id.asc())
     return database.scalars(query).all()
 
 
@@ -357,24 +315,13 @@ def create_count_event(
     database: Session = Depends(get_database)
 ):
     event_uuid = str(payload.event_uuid)
-
     existing = database.scalar(
-        select(CountEvent).where(
-            CountEvent.event_uuid == event_uuid
-        )
+        select(CountEvent).where(CountEvent.event_uuid == event_uuid)
     )
-
     if existing is not None:
-        return event_to_response(
-            existing,
-            duplicate=True
-        )
+        return event_to_response(existing, duplicate=True)
 
-    get_or_create_branch(
-        database,
-        payload.branch_id
-    )
-
+    get_or_create_branch(database, payload.branch_id)
     camera = get_or_create_camera(
         database,
         payload.branch_id,
@@ -389,7 +336,6 @@ def create_count_event(
         event_type=payload.event_type,
         occurred_at=payload.occurred_at
     )
-
     database.add(event)
 
     try:
@@ -397,19 +343,11 @@ def create_count_event(
         database.refresh(event)
     except IntegrityError:
         database.rollback()
-
         existing = database.scalar(
-            select(CountEvent).where(
-                CountEvent.event_uuid == event_uuid
-            )
+            select(CountEvent).where(CountEvent.event_uuid == event_uuid)
         )
-
         if existing is not None:
-            return event_to_response(
-                existing,
-                duplicate=True
-            )
-
+            return event_to_response(existing, duplicate=True)
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="No se pudo registrar el evento"
@@ -417,13 +355,10 @@ def create_count_event(
 
     print(
         "[API] Evento recibido: "
-        f"{event.event_type} | "
-        f"Sucursal={event.branch_id} | "
-        f"Camara={camera.name} | "
-        f"Track={event.track_id} | "
+        f"{event.event_type} | Sucursal={event.branch_id} | "
+        f"Camara={camera.name} | Track={event.track_id} | "
         f"UUID={event.event_uuid}"
     )
-
     return event_to_response(event)
 
 
@@ -440,31 +375,17 @@ def list_count_events(
     database: Session = Depends(get_database)
 ):
     query = select(CountEvent).join(Camera)
-
     if branch_id is not None:
-        query = query.where(
-            CountEvent.branch_id == branch_id
-        )
-
+        query = query.where(CountEvent.branch_id == branch_id)
     if camera_name:
-        query = query.where(
-            Camera.name == camera_name.strip()
-        )
-
+        query = query.where(Camera.name == camera_name.strip())
     if event_type:
-        query = query.where(
-            CountEvent.event_type == event_type
-        )
-
-    query = query.order_by(
-        CountEvent.id.desc()
-    ).limit(limit)
-
-    events = database.scalars(query).all()
+        query = query.where(CountEvent.event_type == event_type)
+    query = query.order_by(CountEvent.id.desc()).limit(limit)
 
     return [
         event_to_response(event)
-        for event in events
+        for event in database.scalars(query).all()
     ]
 
 
@@ -481,22 +402,14 @@ def count_summary(
     query_base = select(func.count(CountEvent.id)).join(Camera).where(
         CountEvent.branch_id == branch_id
     )
-
     if camera_name:
-        query_base = query_base.where(
-            Camera.name == camera_name.strip()
-        )
+        query_base = query_base.where(Camera.name == camera_name.strip())
 
     entries = database.scalar(
-        query_base.where(
-            CountEvent.event_type == "IN"
-        )
+        query_base.where(CountEvent.event_type == "IN")
     ) or 0
-
     exits = database.scalar(
-        query_base.where(
-            CountEvent.event_type == "OUT"
-        )
+        query_base.where(CountEvent.event_type == "OUT")
     ) or 0
 
     return {
@@ -508,12 +421,14 @@ def count_summary(
     }
 
 
-# Todas las capas web se registran en la app principal.
-# De esta forma funcionan tanto con app.main:app como con app.web:app.
+# Capas web y seguridad.
 from app.admin import router as admin_router
+from app.auth import WebAuthMiddleware, router as auth_router
 from app.dashboard import router as dashboard_router
 from app.reports import router as reports_router
 
+app.add_middleware(WebAuthMiddleware)
+app.include_router(auth_router)
 app.include_router(dashboard_router)
 app.include_router(admin_router)
 app.include_router(reports_router)
