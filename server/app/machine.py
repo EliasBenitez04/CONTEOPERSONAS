@@ -108,7 +108,6 @@ def resolve_machine_auth(
 
         return client
 
-    # Compatibilidad temporal con instalaciones anteriores.
     if settings.API_TOKEN:
         if bearer != settings.API_TOKEN:
             raise HTTPException(
@@ -117,6 +116,27 @@ def resolve_machine_auth(
             )
 
     return None
+
+
+def _config_payload(client: ClientDevice, config: ClientConfig):
+    return {
+        "client_id": client.client_id,
+        "branch_id": client.branch_id,
+        "branch_name": client.branch.name,
+        "camera_id": client.camera_id,
+        "camera_name": client.camera.name,
+        "config_version": int(config.config_version or 0),
+        "bootstrap_required": int(config.config_version or 0) <= 0,
+        "line": {
+            "x1": config.line_x1,
+            "y1": config.line_y1,
+            "x2": config.line_x2,
+            "y2": config.line_y2
+        },
+        "in_side": config.in_side,
+        "margin": config.margin,
+        "confidence": config.confidence / 100.0
+    }
 
 
 def client_to_dict(client: ClientDevice):
@@ -139,6 +159,10 @@ def client_to_dict(client: ClientDevice):
         ),
         "created_at": client.created_at.isoformat(),
         "config_version": config.config_version if config else 0,
+        "bootstrap_required": bool(
+            config is not None
+            and int(config.config_version or 0) <= 0
+        ),
         "config": {
             "line": {
                 "x1": config.line_x1,
@@ -246,7 +270,8 @@ def admin_create_client(
             in_side=1,
             margin=18,
             confidence=22,
-            config_version=1
+            # Version 0 = el primer cliente adopta su configuracion local.
+            config_version=0
         )
         database.add(config)
         database.commit()
@@ -264,7 +289,10 @@ def admin_create_client(
         "client_token": raw_token,
         "branch_id": branch.id,
         "camera_name": camera.name,
-        "warning": "El token se muestra una sola vez. Guardelo en client/.env."
+        "warning": (
+            "El token se muestra una sola vez. Al conectar por primera vez, "
+            "el cliente conservara y publicara su configuracion local actual."
+        )
     }
 
 
@@ -287,7 +315,7 @@ def admin_update_client_config(
 
     config = client.config
     if config is None:
-        config = ClientConfig(client_device_id=client.id)
+        config = ClientConfig(client_device_id=client.id, config_version=0)
         database.add(config)
 
     config.line_x1 = payload.line_x1
@@ -297,7 +325,7 @@ def admin_update_client_config(
     config.in_side = 1 if payload.in_side >= 0 else -1
     config.margin = payload.margin
     config.confidence = payload.confidence
-    config.config_version = int(config.config_version or 0) + 1
+    config.config_version = max(1, int(config.config_version or 0) + 1)
     config.updated_at = datetime.now(timezone.utc)
     database.commit()
 
@@ -364,23 +392,57 @@ def client_config(
             detail="El cliente no tiene configuracion"
         )
 
-    return {
-        "client_id": client.client_id,
-        "branch_id": client.branch_id,
-        "branch_name": client.branch.name,
-        "camera_id": client.camera_id,
-        "camera_name": client.camera.name,
-        "config_version": config.config_version,
-        "line": {
-            "x1": config.line_x1,
-            "y1": config.line_y1,
-            "x2": config.line_x2,
-            "y2": config.line_y2
-        },
-        "in_side": config.in_side,
-        "margin": config.margin,
-        "confidence": config.confidence / 100.0
-    }
+    return _config_payload(client, config)
+
+
+@router.post("/api/client/bootstrap-config")
+def bootstrap_client_config(
+    payload: ClientConfigPayload,
+    client: ClientDevice | None = Depends(resolve_machine_auth),
+    database: Session = Depends(get_database)
+):
+    if client is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="CLIENT_ID requerido"
+        )
+
+    managed_client = database.scalar(
+        select(ClientDevice)
+        .options(
+            selectinload(ClientDevice.branch),
+            selectinload(ClientDevice.camera),
+            selectinload(ClientDevice.config)
+        )
+        .where(ClientDevice.id == client.id)
+    )
+    config = managed_client.config
+    if config is None:
+        config = ClientConfig(
+            client_device_id=managed_client.id,
+            config_version=0
+        )
+        database.add(config)
+
+    if int(config.config_version or 0) > 0:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="La configuracion central ya fue inicializada"
+        )
+
+    config.line_x1 = payload.line_x1
+    config.line_y1 = payload.line_y1
+    config.line_x2 = payload.line_x2
+    config.line_y2 = payload.line_y2
+    config.in_side = 1 if payload.in_side >= 0 else -1
+    config.margin = payload.margin
+    config.confidence = payload.confidence
+    config.config_version = 1
+    config.updated_at = datetime.now(timezone.utc)
+    database.commit()
+    database.refresh(config)
+
+    return _config_payload(managed_client, config)
 
 
 @router.post("/api/client/heartbeat")
