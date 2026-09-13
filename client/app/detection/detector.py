@@ -1,6 +1,9 @@
+from pathlib import Path
+
 from ultralytics import YOLO
 
 from app.detection.tracker import Tracker
+from app.paths import resource_path
 
 
 class PersonDetector:
@@ -11,7 +14,11 @@ class PersonDetector:
         confidence=0.22,
         imgsz=640
     ):
-        self.model = YOLO(model_path)
+        resolved_model = Path(model_path)
+        if not resolved_model.is_absolute():
+            resolved_model = resource_path(str(resolved_model))
+
+        self.model = YOLO(str(resolved_model))
         self.confidence = float(confidence)
         self.imgsz = int(imgsz)
         self.tracker = Tracker(
@@ -19,7 +26,7 @@ class PersonDetector:
             max_distance=170
         )
 
-        print("[YOLO] Modelo cargado.")
+        print(f"[YOLO] Modelo cargado: {resolved_model}")
         print("[TRACKER] ID inmediato habilitado.")
 
     def set_confidence(self, confidence):
@@ -31,14 +38,6 @@ class PersonDetector:
         )
 
     def track(self, frame):
-        """
-        Detecta personas con YOLO y luego mantiene un ID local.
-
-        No usamos result.boxes.id porque ByteTrack puede tardar varios
-        frames en confirmar un ID. En una puerta con poco espacio eso
-        hace que una persona cruce la linea antes de tener ID.
-        """
-
         results = self.model.predict(
             source=frame,
             classes=[0],
