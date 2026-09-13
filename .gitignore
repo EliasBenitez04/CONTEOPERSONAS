@@ -10,6 +10,7 @@ venv/
 client/data/*.db
 client/data/*.db-wal
 client/data/*.db-shm
+client/config/camera_config.json
 client/logs/*.log
 client/logs/*.log.*
 client/build/
