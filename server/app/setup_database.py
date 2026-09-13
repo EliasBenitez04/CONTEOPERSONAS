@@ -1,10 +1,12 @@
 import psycopg2
 from psycopg2 import sql
-from sqlalchemy import text
+from sqlalchemy import func, select, text
 
 from app.config import settings
-from app.database import Base, engine
+from app.database import Base, SessionLocal, engine
 from app import models  # noqa: F401
+from app.auth import hash_password
+from app.models import User
 
 
 def ensure_database_exists():
@@ -63,8 +65,54 @@ def create_tables():
 
     print(
         "[DB] Tablas verificadas: "
-        "branches, cameras, count_events"
+        "users, branches, cameras, count_events"
     )
+
+
+def ensure_initial_admin():
+    database = SessionLocal()
+
+    try:
+        user_count = database.scalar(
+            select(func.count(User.id))
+        ) or 0
+
+        if user_count > 0:
+            print(
+                f"[AUTH] Usuarios existentes: {user_count}"
+            )
+            return
+
+        admin = User(
+            username=settings.ADMIN_USERNAME.lower(),
+            full_name=settings.ADMIN_FULL_NAME,
+            password_hash=hash_password(
+                settings.ADMIN_PASSWORD
+            ),
+            role="ADMIN",
+            active=True,
+            must_change_password=True
+        )
+
+        database.add(admin)
+        database.commit()
+
+        print("[AUTH] Administrador inicial creado.")
+        print(
+            "[AUTH] Usuario temporal: "
+            f"{settings.ADMIN_USERNAME}"
+        )
+        print(
+            "[AUTH] Clave temporal:   "
+            f"{settings.ADMIN_PASSWORD}"
+        )
+        print(
+            "[AUTH] Se exigira cambiar la clave "
+            "en el primer ingreso."
+        )
+
+    finally:
+        database.close()
 
 
 def main():
@@ -75,6 +123,7 @@ def main():
 
     ensure_database_exists()
     create_tables()
+    ensure_initial_admin()
 
     print(
         "[DB] PostgreSQL listo para recibir conteos."
