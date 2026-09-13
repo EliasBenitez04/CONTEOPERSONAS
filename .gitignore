@@ -8,6 +8,12 @@ venv/
 .venv/
 
 client/data/*.db
+client/data/*.db-wal
+client/data/*.db-shm
 client/logs/*.log
+
+server/data/*.db
+server/data/*.db-wal
+server/data/*.db-shm
 
 client/models/*.pt
