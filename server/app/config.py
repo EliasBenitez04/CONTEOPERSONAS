@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+from urllib.parse import quote_plus
 
 from dotenv import load_dotenv
 
@@ -21,9 +22,44 @@ class Settings:
         "/api"
     ).rstrip("/")
 
-    DATABASE_URL = os.getenv(
+    PG_HOST = os.getenv(
+        "PG_HOST",
+        "127.0.0.1"
+    )
+
+    PG_PORT = int(
+        os.getenv("PG_PORT", "5432")
+    )
+
+    PG_DATABASE = os.getenv(
+        "PG_DATABASE",
+        "contepersonas"
+    )
+
+    PG_USER = os.getenv(
+        "PG_USER",
+        "postgres"
+    )
+
+    PG_PASSWORD = os.getenv(
+        "PG_PASSWORD",
+        "postgres"
+    )
+
+    _DATABASE_URL_OVERRIDE = os.getenv(
         "DATABASE_URL",
-        "sqlite:///./data/server.db"
+        ""
+    ).strip()
+
+    DATABASE_URL = (
+        _DATABASE_URL_OVERRIDE
+        or (
+            "postgresql+psycopg2://"
+            f"{quote_plus(PG_USER)}:"
+            f"{quote_plus(PG_PASSWORD)}@"
+            f"{PG_HOST}:{PG_PORT}/"
+            f"{quote_plus(PG_DATABASE)}"
+        )
     )
 
     API_TOKEN = os.getenv(
