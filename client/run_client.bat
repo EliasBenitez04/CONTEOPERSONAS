@@ -13,5 +13,5 @@ if not exist ".env" (
 )
 
 call ".venv\Scripts\activate.bat"
-python -m app.main
+python -m app.runner
 endlocal
