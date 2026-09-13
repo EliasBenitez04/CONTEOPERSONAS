@@ -2,10 +2,13 @@ import threading
 import time
 
 from app.api.client import APIClient
+from app.config.settings import settings
 from app.database.database import LocalDatabase
 
 
 class EventSynchronizer:
+
+    HEARTBEAT_INTERVAL_SECONDS = 20
 
     def __init__(
         self,
@@ -27,6 +30,8 @@ class EventSynchronizer:
 
         self._stop_event = threading.Event()
         self._wake_event = threading.Event()
+        self._last_heartbeat_at = 0.0
+        self._heartbeat_online = None
 
         self.thread = threading.Thread(
             target=self._worker,
@@ -71,9 +76,6 @@ class EventSynchronizer:
                     f"HTTP={result['status_code']} | "
                     f"{result['error']}"
                 )
-
-                # Se corta el lote para no golpear el servidor
-                # con todos los pendientes si hay una falla general.
                 break
 
             self.database.mark_as_synchronized(
@@ -91,9 +93,43 @@ class EventSynchronizer:
 
         return synchronized
 
+    def send_heartbeat_if_due(self, force=False):
+        now = time.monotonic()
+
+        if (
+            not force
+            and now - self._last_heartbeat_at
+            < self.HEARTBEAT_INTERVAL_SECONDS
+        ):
+            return
+
+        self._last_heartbeat_at = now
+
+        result = self.api_client.send_heartbeat(
+            branch_id=settings.BRANCH_ID,
+            camera_name=settings.CAMERA_NAME
+        )
+
+        is_online = bool(result["success"])
+
+        if is_online != self._heartbeat_online:
+            if is_online:
+                print(
+                    "[SYNC] Camara ONLINE en servidor central."
+                )
+            else:
+                print(
+                    "[SYNC] Heartbeat sin respuesta. "
+                    f"HTTP={result['status_code']} | "
+                    f"{result['error']}"
+                )
+
+        self._heartbeat_online = is_online
+
     def _worker(self):
         while not self._stop_event.is_set():
             try:
+                self.send_heartbeat_if_due()
                 self.sync_once()
 
             except Exception as error:
@@ -114,6 +150,7 @@ class EventSynchronizer:
     ):
         if final_sync:
             try:
+                self.send_heartbeat_if_due(force=True)
                 self.sync_once()
             except Exception as error:
                 print(
