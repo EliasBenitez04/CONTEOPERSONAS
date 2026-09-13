@@ -6,6 +6,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.auth import session_user_from_request
 from app.database import SessionLocal
+from app.models import AuditLog
 
 
 class WebAuthMiddleware(BaseHTTPMiddleware):
@@ -34,7 +35,6 @@ class WebAuthMiddleware(BaseHTTPMiddleware):
 
     async def dispatch(self, request: Request, call_next):
         path = request.url.path
-
         protected = (
             path.startswith(self.AUTHENTICATED_PREFIXES)
             or path.startswith(self.SUPERVISOR_PREFIXES)
@@ -45,6 +45,7 @@ class WebAuthMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         database = SessionLocal()
+        user = None
         try:
             user = session_user_from_request(request, database)
             request.state.user = user
@@ -74,7 +75,6 @@ class WebAuthMiddleware(BaseHTTPMiddleware):
                         status_code=status.HTTP_403_FORBIDDEN,
                         content={"detail": "Debe cambiar su contraseña"}
                     )
-
                 return RedirectResponse(
                     url="/change-password",
                     status_code=status.HTTP_303_SEE_OTHER
@@ -89,9 +89,59 @@ class WebAuthMiddleware(BaseHTTPMiddleware):
             ):
                 return self._forbidden(path)
 
-            return await call_next(request)
+            response = await call_next(request)
+
+            if self._should_audit(request):
+                try:
+                    database.add(
+                        AuditLog(
+                            user_id=user.id,
+                            username=user.username,
+                            action=self._action_name(request),
+                            method=request.method,
+                            path=path,
+                            status_code=response.status_code,
+                            ip_address=(
+                                request.client.host
+                                if request.client else None
+                            ),
+                            details=(
+                                request.url.query[:1000]
+                                if request.url.query else None
+                            )
+                        )
+                    )
+                    database.commit()
+                except Exception as error:
+                    database.rollback()
+                    print("[AUDIT] No se pudo registrar:", error)
+
+            return response
         finally:
             database.close()
+
+    @staticmethod
+    def _should_audit(request: Request):
+        if request.method in ("POST", "PUT", "PATCH", "DELETE"):
+            return True
+        return request.url.path == "/api/reports/export.csv"
+
+    @staticmethod
+    def _action_name(request: Request):
+        path = request.url.path
+        if path.startswith("/api/admin/clients"):
+            return "Administración de cliente"
+        if path.startswith("/api/admin/branches"):
+            return "Administración de sucursal"
+        if path.startswith("/api/admin/cameras"):
+            return "Administración de cámara"
+        if path.startswith("/api/users"):
+            return "Administración de usuario"
+        if path == "/api/reports/export.csv":
+            return "Exportación de reporte"
+        if path == "/api/auth/change-password":
+            return "Cambio de contraseña"
+        return f"{request.method} {path}"
 
     @staticmethod
     def _forbidden(path: str):
