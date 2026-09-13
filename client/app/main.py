@@ -21,6 +21,12 @@ from app.database.database import (
 from app.database.models import (
     CountEvent
 )
+from app.api.client import (
+    APIClient
+)
+from app.api.sync import (
+    EventSynchronizer
+)
 
 
 def get_line(config):
@@ -238,6 +244,23 @@ def main():
         database
     )
 
+    api_client = APIClient(
+        base_url=settings.API_URL,
+        token=settings.API_TOKEN,
+        timeout=settings.API_TIMEOUT_SECONDS
+    )
+
+    synchronizer = EventSynchronizer(
+        database=database,
+        api_client=api_client,
+        interval_seconds=(
+            settings.SYNC_INTERVAL_SECONDS
+        ),
+        batch_size=(
+            settings.SYNC_BATCH_SIZE
+        )
+    )
+
     today_totals = (
         database.get_today_totals(
             branch_id=settings.BRANCH_ID,
@@ -372,6 +395,8 @@ def main():
                         count_event
                     )
 
+                    synchronizer.notify_new_event()
+
             today_in = (
                 session_base_in
                 + counter.entries
@@ -466,6 +491,8 @@ def main():
                         camera_name=settings.CAMERA_NAME
                     )
 
+                    synchronizer.notify_new_event()
+
                 counter.set_line(
                     line_p1,
                     line_p2
@@ -519,6 +546,9 @@ def main():
     finally:
         camera.stop()
         event_writer.close()
+        synchronizer.close(
+            final_sync=True
+        )
         cv2.destroyAllWindows()
 
 
