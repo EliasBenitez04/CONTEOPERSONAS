@@ -37,9 +37,6 @@ class WebAuthMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         path = request.url.path
 
-        # V3: en produccion, el heartbeat antiguo deja de aceptar clientes
-        # y los conteos deben usar CLIENT_ID+CLIENT_TOKEN, salvo que el
-        # administrador haya habilitado deliberadamente API_TOKEN legacy.
         if settings.ENVIRONMENT == "production":
             if path == "/api/cameras/heartbeat":
                 return JSONResponse(
@@ -54,6 +51,7 @@ class WebAuthMiddleware(BaseHTTPMiddleware):
 
             if (
                 path == "/api/count-events"
+                and request.method == "POST"
                 and not request.headers.get("X-Client-ID")
                 and not settings.API_TOKEN
             ):
@@ -61,6 +59,32 @@ class WebAuthMiddleware(BaseHTTPMiddleware):
                     status_code=status.HTTP_401_UNAUTHORIZED,
                     content={
                         "detail": "CLIENT_ID y CLIENT_TOKEN requeridos en produccion"
+                    }
+                )
+
+            legacy_paths = (
+                "/api/branches",
+                "/api/cameras",
+                "/api/summary"
+            )
+            legacy_read = (
+                path == "/api/count-events"
+                and request.method == "GET"
+            )
+            if (
+                not settings.API_TOKEN
+                and (
+                    path in legacy_paths
+                    or legacy_read
+                )
+            ):
+                return JSONResponse(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    content={
+                        "detail": (
+                            "API legacy deshabilitada en produccion. "
+                            "Use la interfaz web autenticada."
+                        )
                     }
                 )
 
