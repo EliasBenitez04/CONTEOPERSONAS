@@ -33,7 +33,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title=settings.APP_NAME,
-    version="2.1.0",
+    version="2.2.0",
     lifespan=lifespan
 )
 
@@ -508,8 +508,12 @@ def count_summary(
     }
 
 
-# Dashboard + heartbeat se registran tambien en la app principal.
-# Asi funciona tanto con `uvicorn app.main:app` como con `app.web:app`.
+# Todas las capas web se registran en la app principal.
+# De esta forma funcionan tanto con app.main:app como con app.web:app.
+from app.admin import router as admin_router
 from app.dashboard import router as dashboard_router
+from app.reports import router as reports_router
 
 app.include_router(dashboard_router)
+app.include_router(admin_router)
+app.include_router(reports_router)
