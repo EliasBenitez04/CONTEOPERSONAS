@@ -3,7 +3,7 @@ setlocal
 cd /d "%~dp0"
 
 echo ===============================================
-echo   SISTEMA CAMARA - SERVIDOR CENTRAL
+echo   SISTEMA CAMARA - SERVIDOR CENTRAL POSTGRESQL
 echo ===============================================
 
 if not exist ".venv\Scripts\python.exe" (
@@ -15,23 +15,41 @@ if not exist ".venv\Scripts\python.exe" (
         pause
         exit /b 1
     )
+)
 
-    call ".venv\Scripts\activate.bat"
+call ".venv\Scripts\activate.bat"
 
-    echo [SETUP] Instalando dependencias...
-    python -m pip install -r requirements.txt
+echo [SETUP] Verificando dependencias...
+python -m pip install -r requirements.txt
 
-    if errorlevel 1 (
-        echo [ERROR] No se pudieron instalar las dependencias.
-        pause
-        exit /b 1
-    )
-) else (
-    call ".venv\Scripts\activate.bat"
+if errorlevel 1 (
+    echo [ERROR] No se pudieron instalar las dependencias.
+    pause
+    exit /b 1
+)
+
+if not exist ".env" (
+    echo [SETUP] Creando server\.env desde .env.example...
+    copy /Y ".env.example" ".env" >nul
+    echo [SETUP] Se creo .env con usuario postgres y clave postgres.
+    echo [SETUP] Si tu PostgreSQL usa otra clave, edita server\.env.
 )
 
 echo.
-echo [SERVER] Iniciando API en http://127.0.0.1:8000
+echo [DB] Verificando PostgreSQL y estructura...
+python -m app.setup_database
+
+if errorlevel 1 (
+    echo.
+    echo [ERROR] No se pudo preparar PostgreSQL.
+    echo Revisa server\.env: PG_HOST, PG_PORT, PG_DATABASE, PG_USER y PG_PASSWORD.
+    pause
+    exit /b 1
+)
+
+echo.
+echo [SERVER] API: http://127.0.0.1:8000
+echo [SERVER] Health: http://127.0.0.1:8000/api/health
 echo [SERVER] Swagger: http://127.0.0.1:8000/docs
 echo.
 
