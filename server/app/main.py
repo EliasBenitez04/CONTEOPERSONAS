@@ -33,7 +33,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title=settings.APP_NAME,
-    version="2.3.0",
+    version="3.0.0",
     lifespan=lifespan
 )
 
@@ -55,10 +55,7 @@ def verify_api_token(
         )
 
 
-def event_to_response(
-    event: CountEvent,
-    duplicate: bool = False
-):
+def event_to_response(event: CountEvent, duplicate: bool = False):
     return CountEventResponse(
         id=event.id,
         event_uuid=event.event_uuid,
@@ -86,15 +83,9 @@ def get_or_create_branch(database: Session, branch_id: int):
             branch = database.get(Branch, branch_id)
 
     if branch is None:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="No se pudo registrar la sucursal"
-        )
+        raise HTTPException(status_code=500, detail="No se pudo registrar la sucursal")
     if not branch.active:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="La sucursal esta inactiva"
-        )
+        raise HTTPException(status_code=403, detail="La sucursal esta inactiva")
     return branch
 
 
@@ -128,15 +119,9 @@ def get_or_create_camera(database: Session, branch_id: int, camera_name: str):
             )
 
     if camera is None:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="No se pudo registrar la camara"
-        )
+        raise HTTPException(status_code=500, detail="No se pudo registrar la camara")
     if not camera.active:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="La camara esta inactiva"
-        )
+        raise HTTPException(status_code=403, detail="La camara esta inactiva")
 
     camera.last_seen_at = datetime.now(timezone.utc)
     database.commit()
@@ -248,13 +233,20 @@ def list_cameras(
     ).all()
 
 
+# La identidad del cliente V3 tiene prioridad sobre branch_id/camera_name del payload.
+from app.machine import resolve_machine_auth
+
+
 @app.post(
     f"{settings.API_PREFIX}/count-events",
     response_model=CountEventResponse,
-    status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(verify_api_token)]
+    status_code=status.HTTP_201_CREATED
 )
-def create_count_event(payload: CountEventCreate, database: Session = Depends(get_database)):
+def create_count_event(
+    payload: CountEventCreate,
+    machine_client=Depends(resolve_machine_auth),
+    database: Session = Depends(get_database)
+):
     event_uuid = str(payload.event_uuid)
     existing = database.scalar(
         select(CountEvent).where(CountEvent.event_uuid == event_uuid)
@@ -262,12 +254,23 @@ def create_count_event(payload: CountEventCreate, database: Session = Depends(ge
     if existing is not None:
         return event_to_response(existing, duplicate=True)
 
-    get_or_create_branch(database, payload.branch_id)
-    camera = get_or_create_camera(database, payload.branch_id, payload.camera_name)
+    if machine_client is not None:
+        branch_id = machine_client.branch_id
+        camera = database.get(Camera, machine_client.camera_id)
+        if camera is None or not camera.active:
+            raise HTTPException(status_code=403, detail="Camara del cliente no disponible")
+        if not machine_client.branch.active:
+            raise HTTPException(status_code=403, detail="Sucursal del cliente inactiva")
+        camera.last_seen_at = datetime.now(timezone.utc)
+    else:
+        # Compatibilidad con cliente V2 durante la migracion.
+        branch_id = payload.branch_id
+        get_or_create_branch(database, branch_id)
+        camera = get_or_create_camera(database, branch_id, payload.camera_name)
 
     event = CountEvent(
         event_uuid=event_uuid,
-        branch_id=payload.branch_id,
+        branch_id=branch_id,
         camera_id=camera.id,
         track_id=payload.track_id,
         event_type=payload.event_type,
@@ -348,6 +351,7 @@ def count_summary(
 from app.admin import router as admin_router
 from app.auth import router as auth_router
 from app.dashboard import router as dashboard_router
+from app.machine import router as machine_router
 from app.reports import router as reports_router
 from app.security import WebAuthMiddleware
 
@@ -355,4 +359,5 @@ app.add_middleware(WebAuthMiddleware)
 app.include_router(auth_router)
 app.include_router(dashboard_router)
 app.include_router(admin_router)
+app.include_router(machine_router)
 app.include_router(reports_router)
