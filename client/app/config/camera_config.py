@@ -3,7 +3,9 @@ import json
 from app.paths import CLIENT_DIR
 
 
-CONFIG_FILE = CLIENT_DIR / "data" / "camera_config.json"
+# Se conserva la ruta historica del proyecto para no perder la linea
+# ya calibrada al migrar a V3 ni al actualizar el ejecutable.
+CONFIG_FILE = CLIENT_DIR / "config" / "camera_config.json"
 
 
 DEFAULT_CONFIG = {
