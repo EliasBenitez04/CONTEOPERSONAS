@@ -52,6 +52,7 @@ echo [SERVER] API: http://127.0.0.1:8000
 echo [SERVER] Dashboard: http://127.0.0.1:8000/dashboard
 echo [SERVER] Sucursales: http://127.0.0.1:8000/admin/branches
 echo [SERVER] Camaras: http://127.0.0.1:8000/admin/cameras
+echo [SERVER] Reportes: http://127.0.0.1:8000/reports
 echo [SERVER] Health: http://127.0.0.1:8000/api/health
 echo [SERVER] Swagger: http://127.0.0.1:8000/docs
 echo.
