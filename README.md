@@ -20,19 +20,21 @@ Cada instalación V3 usa un `CLIENT_ID` y `CLIENT_TOKEN` propio. El servidor aso
 - SQLite offline con reintento automático.
 - PostgreSQL central.
 - FastAPI.
-- Dashboard en tiempo real.
+- Dashboard ejecutivo en tiempo real.
 - Cámaras ONLINE/OFFLINE.
 - Telemetría de clientes, versión, pendientes y errores.
 - CRUD sucursales/cámaras.
 - Registro seguro de clientes por token individual.
 - Configuración remota.
-- Reportes por rango/sucursal/cámara y CSV.
+- Reportes por rango/sucursal/cámara, tendencias diaria/semanal/mensual y CSV.
+- Promedios, día/hora pico y ranking de sucursales.
 - Login, usuarios y roles ADMIN/SUPERVISOR/VIEWER.
 - Auditoría.
-- Backups PostgreSQL y retención.
-- Autoinicio en Windows.
+- Backups PostgreSQL, restauración y retención.
+- Autoinicio/watchdog en Windows.
+- Logs persistentes.
 - Plantilla HTTPS con Caddy.
-- Script de empaquetado con PyInstaller.
+- Empaquetado PyInstaller e instalador `SetupContePersonas.exe`.
 
 ## Servidor
 
@@ -54,7 +56,7 @@ Accesos locales:
 
 PostgreSQL se prepara automáticamente mediante `app.setup_database`.
 
-## Cliente
+## Cliente desde código fuente
 
 Primera preparación:
 
@@ -71,14 +73,14 @@ Ejecutar:
 .\run_client.bat
 ```
 
-El cliente escribe también en `client/logs/client.log`.
+El cliente escribe en `client/logs/client.log` y conserva SQLite en `client/data/local.db`.
 
 ## Convertir un cliente a V3 administrado
 
 1. Crear/confirmar sucursal y cámara.
 2. Entrar a `/admin/clients`.
 3. Registrar cliente para esa cámara.
-4. Copiar el `CLIENT_ID` y `CLIENT_TOKEN` mostrados.
+4. Copiar el `CLIENT_ID` y `CLIENT_TOKEN` mostrados una sola vez.
 5. Colocarlos en `client/.env` junto a la URL central.
 6. Reiniciar el cliente.
 7. Confirmar ONLINE, versión y pendientes en Dashboard/Clientes.
@@ -92,6 +94,8 @@ API_URL=https://conteo.midominio.com/api
 CLIENT_ID=...
 CLIENT_TOKEN=...
 ```
+
+El servidor ignora `BRANCH_ID`/`CAMERA_NAME` declarados por un cliente V3 y utiliza la asociación registrada centralmente.
 
 ## Automatización Windows
 
@@ -107,6 +111,8 @@ Servidor y backup diario (ejecutar como Administrador):
 server\scripts\install_server_autostart.bat
 server\scripts\install_backup_task.bat
 ```
+
+Los procesos automatizados incluyen watchdog para reiniciarse después de un fallo.
 
 ## Backups
 
@@ -133,12 +139,29 @@ En producción:
 - `ENABLE_DOCS=0`;
 - restringir `TRUSTED_HOSTS`;
 - no exponer PostgreSQL a Internet;
-- usar un token distinto por cliente.
+- usar un token distinto por cliente;
+- el heartbeat V2 queda deshabilitado y los conteos V3 requieren identidad individual.
 
-## Empaquetado
+## Ejecutable e instalador
+
+Generar solamente el cliente compilado:
 
 ```powershell
 client\build_client.bat
 ```
 
-Genera `client/dist/ContePersonas` en modo `onedir`.
+Genera `client/dist/ContePersonas`.
+
+Para generar el instalador completo es necesario tener Inno Setup 6 instalado:
+
+```powershell
+client\build_installer.bat
+```
+
+Salida:
+
+```text
+client\dist\installer\SetupContePersonas.exe
+```
+
+El instalador crea `.env` solo si todavía no existe, conserva configuración/SQLite en actualizaciones y puede habilitar autoinicio con watchdog.
