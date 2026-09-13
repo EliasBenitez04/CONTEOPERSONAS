@@ -72,5 +72,29 @@ class Settings:
         ""
     ).strip()
 
+    SESSION_SECRET = os.getenv(
+        "SESSION_SECRET",
+        "cambiar-esta-clave-sistema-camara-2026"
+    ).strip()
+
+    SESSION_HOURS = int(
+        os.getenv("SESSION_HOURS", "12")
+    )
+
+    ADMIN_USERNAME = os.getenv(
+        "ADMIN_USERNAME",
+        "admin"
+    ).strip()
+
+    ADMIN_PASSWORD = os.getenv(
+        "ADMIN_PASSWORD",
+        "Admin123!"
+    )
+
+    ADMIN_FULL_NAME = os.getenv(
+        "ADMIN_FULL_NAME",
+        "Administrador"
+    ).strip()
+
 
 settings = Settings()
