@@ -98,21 +98,21 @@ def draw_direction_labels(
 
     cv2.putText(
         frame,
-        "IN",
+        "OUT",
         in_pos,
         cv2.FONT_HERSHEY_SIMPLEX,
         0.90,
-        (0, 255, 0),
+        (0, 70, 255),
         3
     )
 
     cv2.putText(
         frame,
-        "OUT",
+        "IN",
         out_pos,
         cv2.FONT_HERSHEY_SIMPLEX,
         0.90,
-        (0, 70, 255),
+        (0, 255, 0),
         3
     )
 
