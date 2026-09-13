@@ -8,58 +8,23 @@ from queue import Queue
 from app.database.models import CountEvent
 
 
-CLIENT_DIR = (
-    Path(__file__)
-    .resolve()
-    .parents[2]
-)
-
-DATABASE_PATH = (
-    CLIENT_DIR
-    / "data"
-    / "local.db"
-)
+CLIENT_DIR = Path(__file__).resolve().parents[2]
+DATABASE_PATH = CLIENT_DIR / "data" / "local.db"
 
 
 class LocalDatabase:
 
-    def __init__(
-        self,
-        database_path=DATABASE_PATH
-    ):
-        self.database_path = Path(
-            database_path
-        )
-
-        self.database_path.parent.mkdir(
-            parents=True,
-            exist_ok=True
-        )
-
+    def __init__(self, database_path=DATABASE_PATH):
+        self.database_path = Path(database_path)
+        self.database_path.parent.mkdir(parents=True, exist_ok=True)
         self.initialize()
 
     def connect(self):
-        connection = sqlite3.connect(
-            self.database_path,
-            timeout=10
-        )
-
-        connection.row_factory = (
-            sqlite3.Row
-        )
-
-        connection.execute(
-            "PRAGMA journal_mode=WAL;"
-        )
-
-        connection.execute(
-            "PRAGMA synchronous=NORMAL;"
-        )
-
-        connection.execute(
-            "PRAGMA busy_timeout=10000;"
-        )
-
+        connection = sqlite3.connect(self.database_path, timeout=10)
+        connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA journal_mode=WAL;")
+        connection.execute("PRAGMA synchronous=NORMAL;")
+        connection.execute("PRAGMA busy_timeout=10000;")
         return connection
 
     def initialize(self):
@@ -69,82 +34,43 @@ class LocalDatabase:
                 CREATE TABLE IF NOT EXISTS count_events
                 (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
-
                     event_uuid TEXT NOT NULL UNIQUE,
-
                     branch_id INTEGER NOT NULL,
-
                     camera_name TEXT NOT NULL,
-
                     track_id INTEGER,
-
                     event_type TEXT NOT NULL
-                        CHECK (
-                            event_type IN ('IN', 'OUT')
-                        ),
-
+                        CHECK (event_type IN ('IN', 'OUT')),
                     occurred_at TEXT NOT NULL,
-
-                    synchronized INTEGER NOT NULL
-                        DEFAULT 0
-                        CHECK (
-                            synchronized IN (0, 1)
-                        ),
-
+                    synchronized INTEGER NOT NULL DEFAULT 0
+                        CHECK (synchronized IN (0, 1)),
                     synced_at TEXT,
-
-                    created_at TEXT NOT NULL
-                        DEFAULT CURRENT_TIMESTAMP
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                 )
                 """
             )
-
             connection.execute(
                 """
-                CREATE INDEX IF NOT EXISTS
-                idx_count_events_sync
-                ON count_events (
-                    synchronized
-                )
+                CREATE INDEX IF NOT EXISTS idx_count_events_sync
+                ON count_events (synchronized)
                 """
             )
-
             connection.execute(
                 """
-                CREATE INDEX IF NOT EXISTS
-                idx_count_events_branch_camera
-                ON count_events (
-                    branch_id,
-                    camera_name,
-                    occurred_at
-                )
+                CREATE INDEX IF NOT EXISTS idx_count_events_branch_camera
+                ON count_events (branch_id, camera_name, occurred_at)
                 """
             )
-
             connection.commit()
 
-        print(
-            f"[DB] SQLite lista: "
-            f"{self.database_path}"
-        )
+        print(f"[DB] SQLite lista: {self.database_path}")
 
-    def insert_event(
-        self,
-        event: CountEvent
-    ):
+    def insert_event(self, event: CountEvent):
         with self.connect() as connection:
             connection.execute(
                 """
                 INSERT OR IGNORE INTO count_events
-                (
-                    event_uuid,
-                    branch_id,
-                    camera_name,
-                    track_id,
-                    event_type,
-                    occurred_at,
-                    synchronized
-                )
+                (event_uuid, branch_id, camera_name, track_id,
+                 event_type, occurred_at, synchronized)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
@@ -157,248 +83,137 @@ class LocalDatabase:
                     event.synchronized
                 )
             )
-
             connection.commit()
 
-    def get_today_totals(
-        self,
-        branch_id: int,
-        camera_name: str
-    ):
-        today = (
-            datetime.now()
-            .astimezone()
-            .date()
-            .isoformat()
-        )
-
-        totals = {
-            "IN": 0,
-            "OUT": 0
-        }
+    def get_today_totals(self, branch_id: int, camera_name: str):
+        today = datetime.now().astimezone().date().isoformat()
+        totals = {"IN": 0, "OUT": 0}
 
         with self.connect() as connection:
             rows = connection.execute(
                 """
-                SELECT
-                    event_type,
-                    COUNT(*) AS total
-
+                SELECT event_type, COUNT(*) AS total
                 FROM count_events
-
                 WHERE branch_id = ?
-                AND camera_name = ?
-                AND substr(
-                    occurred_at,
-                    1,
-                    10
-                ) = ?
-
+                  AND camera_name = ?
+                  AND substr(occurred_at, 1, 10) = ?
                 GROUP BY event_type
                 """,
-                (
-                    branch_id,
-                    camera_name,
-                    today
-                )
+                (branch_id, camera_name, today)
             ).fetchall()
 
         for row in rows:
-            totals[
-                row["event_type"]
-            ] = row["total"]
-
+            totals[row["event_type"]] = row["total"]
         return totals
 
-    def swap_today_event_types(
-        self,
-        branch_id: int,
-        camera_name: str
-    ):
-        today = (
-            datetime.now()
-            .astimezone()
-            .date()
-            .isoformat()
-        )
+    def swap_today_event_types(self, branch_id: int, camera_name: str):
+        today = datetime.now().astimezone().date().isoformat()
 
         with self.connect() as connection:
             cursor = connection.execute(
                 """
                 UPDATE count_events
-
-                SET
-                    event_type = CASE
-                        WHEN event_type = 'IN'
-                            THEN 'OUT'
-                        WHEN event_type = 'OUT'
-                            THEN 'IN'
+                SET event_type = CASE
+                        WHEN event_type = 'IN' THEN 'OUT'
+                        WHEN event_type = 'OUT' THEN 'IN'
                         ELSE event_type
                     END,
                     synchronized = 0,
                     synced_at = NULL
-
                 WHERE branch_id = ?
-                AND camera_name = ?
-                AND substr(
-                    occurred_at,
-                    1,
-                    10
-                ) = ?
+                  AND camera_name = ?
+                  AND substr(occurred_at, 1, 10) = ?
                 """,
-                (
-                    branch_id,
-                    camera_name,
-                    today
-                )
+                (branch_id, camera_name, today)
             )
-
             connection.commit()
 
         print(
             "[DB] Direccion del dia invertida. "
             f"Eventos actualizados: {cursor.rowcount}"
         )
-
         return cursor.rowcount
 
-    def get_pending_events(
-        self,
-        limit=100
-    ):
+    def get_pending_events(self, limit=100):
         with self.connect() as connection:
             rows = connection.execute(
                 """
                 SELECT *
-
                 FROM count_events
-
                 WHERE synchronized = 0
-
                 ORDER BY id ASC
-
                 LIMIT ?
                 """,
-                (
-                    limit,
-                )
+                (limit,)
             ).fetchall()
+        return [dict(row) for row in rows]
 
-        return [
-            dict(row)
-            for row in rows
-        ]
+    def count_pending_events(self):
+        with self.connect() as connection:
+            row = connection.execute(
+                """
+                SELECT COUNT(*) AS total
+                FROM count_events
+                WHERE synchronized = 0
+                """
+            ).fetchone()
+        return int(row["total"] if row else 0)
 
-    def mark_as_synchronized(
-        self,
-        event_uuid: str
-    ):
-        synced_at = (
-            datetime.now()
-            .astimezone()
-            .isoformat(
-                timespec="seconds"
-            )
-        )
-
+    def mark_as_synchronized(self, event_uuid: str):
+        synced_at = datetime.now().astimezone().isoformat(timespec="seconds")
         with self.connect() as connection:
             connection.execute(
                 """
                 UPDATE count_events
-
-                SET
-                    synchronized = 1,
+                SET synchronized = 1,
                     synced_at = ?
-
                 WHERE event_uuid = ?
                 """,
-                (
-                    synced_at,
-                    event_uuid
-                )
+                (synced_at, event_uuid)
             )
-
             connection.commit()
 
-    def get_recent_events(
-        self,
-        limit=20
-    ):
+    def get_recent_events(self, limit=20):
         with self.connect() as connection:
             rows = connection.execute(
                 """
                 SELECT *
-
                 FROM count_events
-
                 ORDER BY id DESC
-
                 LIMIT ?
                 """,
-                (
-                    limit,
-                )
+                (limit,)
             ).fetchall()
-
-        return [
-            dict(row)
-            for row in rows
-        ]
+        return [dict(row) for row in rows]
 
 
 class AsyncEventWriter:
 
-    def __init__(
-        self,
-        database: LocalDatabase
-    ):
+    def __init__(self, database: LocalDatabase):
         self.database = database
         self.queue = Queue()
-
-        self.thread = threading.Thread(
-            target=self._worker,
-            daemon=True
-        )
-
+        self.thread = threading.Thread(target=self._worker, daemon=True)
         self.thread.start()
+        print("[DB] Escritor asincrono iniciado.")
 
-        print(
-            "[DB] Escritor asincrono iniciado."
-        )
-
-    def enqueue(
-        self,
-        event: CountEvent
-    ):
-        self.queue.put(
-            event
-        )
+    def enqueue(self, event: CountEvent):
+        self.queue.put(event)
 
     def _worker(self):
         while True:
             event = self.queue.get()
-
             if event is None:
                 self.queue.task_done()
                 break
 
             try:
-                self.database.insert_event(
-                    event
-                )
-
+                self.database.insert_event(event)
                 print(
                     "[DB] Evento guardado: "
-                    f"{event.event_type} "
-                    f"ID={event.track_id}"
+                    f"{event.event_type} ID={event.track_id}"
                 )
-
             except Exception as error:
-                print(
-                    "[DB] Error guardando evento:",
-                    error
-                )
-
+                print("[DB] Error guardando evento:", error)
             finally:
                 self.queue.task_done()
 
@@ -407,15 +222,6 @@ class AsyncEventWriter:
 
     def close(self):
         self.flush()
-
-        self.queue.put(
-            None
-        )
-
-        self.thread.join(
-            timeout=5
-        )
-
-        print(
-            "[DB] Escritor detenido."
-        )
+        self.queue.put(None)
+        self.thread.join(timeout=5)
+        print("[DB] Escritor detenido.")
