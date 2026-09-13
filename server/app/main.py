@@ -73,18 +73,10 @@ def event_to_response(
     )
 
 
-def get_or_create_branch(
-    database: Session,
-    branch_id: int
-):
+def get_or_create_branch(database: Session, branch_id: int):
     branch = database.get(Branch, branch_id)
-
     if branch is None:
-        branch = Branch(
-            id=branch_id,
-            name=f"SUCURSAL_{branch_id}",
-            active=True
-        )
+        branch = Branch(id=branch_id, name=f"SUCURSAL_{branch_id}", active=True)
         database.add(branch)
         try:
             database.commit()
@@ -98,23 +90,16 @@ def get_or_create_branch(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="No se pudo registrar la sucursal"
         )
-
     if not branch.active:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="La sucursal esta inactiva"
         )
-
     return branch
 
 
-def get_or_create_camera(
-    database: Session,
-    branch_id: int,
-    camera_name: str
-):
+def get_or_create_camera(database: Session, branch_id: int, camera_name: str):
     camera_name = camera_name.strip()
-
     camera = database.scalar(
         select(Camera).where(
             Camera.branch_id == branch_id,
@@ -147,7 +132,6 @@ def get_or_create_camera(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="No se pudo registrar la camara"
         )
-
     if not camera.active:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -157,23 +141,15 @@ def get_or_create_camera(
     camera.last_seen_at = datetime.now(timezone.utc)
     database.commit()
     database.refresh(camera)
-
     return camera
 
 
 @app.get("/", response_model=HealthResponse)
 def root():
-    return {
-        "status": "ok",
-        "service": settings.APP_NAME,
-        "database": "PostgreSQL"
-    }
+    return {"status": "ok", "service": settings.APP_NAME, "database": "PostgreSQL"}
 
 
-@app.get(
-    f"{settings.API_PREFIX}/health",
-    response_model=HealthResponse
-)
+@app.get(f"{settings.API_PREFIX}/health", response_model=HealthResponse)
 def health(database: Session = Depends(get_database)):
     try:
         database.execute(text("SELECT 1"))
@@ -182,12 +158,7 @@ def health(database: Session = Depends(get_database)):
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=f"Base de datos no disponible: {error}"
         ) from error
-
-    return {
-        "status": "ok",
-        "service": settings.APP_NAME,
-        "database": "PostgreSQL"
-    }
+    return {"status": "ok", "service": settings.APP_NAME, "database": "PostgreSQL"}
 
 
 @app.post(
@@ -196,16 +167,9 @@ def health(database: Session = Depends(get_database)):
     status_code=status.HTTP_201_CREATED,
     dependencies=[Depends(verify_api_token)]
 )
-def create_branch(
-    payload: BranchCreate,
-    database: Session = Depends(get_database)
-):
-    existing = database.get(Branch, payload.id)
-    if existing is not None:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="La sucursal ya existe"
-        )
+def create_branch(payload: BranchCreate, database: Session = Depends(get_database)):
+    if database.get(Branch, payload.id) is not None:
+        raise HTTPException(status_code=409, detail="La sucursal ya existe")
 
     branch = Branch(
         id=payload.id,
@@ -214,17 +178,12 @@ def create_branch(
         active=payload.active
     )
     database.add(branch)
-
     try:
         database.commit()
         database.refresh(branch)
     except IntegrityError as error:
         database.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="No se pudo crear la sucursal"
-        ) from error
-
+        raise HTTPException(status_code=409, detail="No se pudo crear la sucursal") from error
     return branch
 
 
@@ -234,9 +193,7 @@ def create_branch(
     dependencies=[Depends(verify_api_token)]
 )
 def list_branches(database: Session = Depends(get_database)):
-    return database.scalars(
-        select(Branch).order_by(Branch.id.asc())
-    ).all()
+    return database.scalars(select(Branch).order_by(Branch.id.asc())).all()
 
 
 @app.post(
@@ -245,16 +202,10 @@ def list_branches(database: Session = Depends(get_database)):
     status_code=status.HTTP_201_CREATED,
     dependencies=[Depends(verify_api_token)]
 )
-def create_camera(
-    payload: CameraCreate,
-    database: Session = Depends(get_database)
-):
+def create_camera(payload: CameraCreate, database: Session = Depends(get_database)):
     branch = database.get(Branch, payload.branch_id)
     if branch is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="La sucursal no existe"
-        )
+        raise HTTPException(status_code=404, detail="La sucursal no existe")
 
     existing = database.scalar(
         select(Camera).where(
@@ -263,10 +214,7 @@ def create_camera(
         )
     )
     if existing is not None:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="La camara ya existe en esta sucursal"
-        )
+        raise HTTPException(status_code=409, detail="La camara ya existe en esta sucursal")
 
     camera = Camera(
         branch_id=payload.branch_id,
@@ -274,17 +222,12 @@ def create_camera(
         active=payload.active
     )
     database.add(camera)
-
     try:
         database.commit()
         database.refresh(camera)
     except IntegrityError as error:
         database.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="No se pudo crear la camara"
-        ) from error
-
+        raise HTTPException(status_code=409, detail="No se pudo crear la camara") from error
     return camera
 
 
@@ -300,8 +243,9 @@ def list_cameras(
     query = select(Camera)
     if branch_id is not None:
         query = query.where(Camera.branch_id == branch_id)
-    query = query.order_by(Camera.branch_id.asc(), Camera.id.asc())
-    return database.scalars(query).all()
+    return database.scalars(
+        query.order_by(Camera.branch_id.asc(), Camera.id.asc())
+    ).all()
 
 
 @app.post(
@@ -310,10 +254,7 @@ def list_cameras(
     status_code=status.HTTP_201_CREATED,
     dependencies=[Depends(verify_api_token)]
 )
-def create_count_event(
-    payload: CountEventCreate,
-    database: Session = Depends(get_database)
-):
+def create_count_event(payload: CountEventCreate, database: Session = Depends(get_database)):
     event_uuid = str(payload.event_uuid)
     existing = database.scalar(
         select(CountEvent).where(CountEvent.event_uuid == event_uuid)
@@ -322,11 +263,7 @@ def create_count_event(
         return event_to_response(existing, duplicate=True)
 
     get_or_create_branch(database, payload.branch_id)
-    camera = get_or_create_camera(
-        database,
-        payload.branch_id,
-        payload.camera_name
-    )
+    camera = get_or_create_camera(database, payload.branch_id, payload.camera_name)
 
     event = CountEvent(
         event_uuid=event_uuid,
@@ -348,16 +285,12 @@ def create_count_event(
         )
         if existing is not None:
             return event_to_response(existing, duplicate=True)
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="No se pudo registrar el evento"
-        )
+        raise HTTPException(status_code=409, detail="No se pudo registrar el evento")
 
     print(
         "[API] Evento recibido: "
         f"{event.event_type} | Sucursal={event.branch_id} | "
-        f"Camara={camera.name} | Track={event.track_id} | "
-        f"UUID={event.event_uuid}"
+        f"Camara={camera.name} | Track={event.track_id} | UUID={event.event_uuid}"
     )
     return event_to_response(event)
 
@@ -382,11 +315,7 @@ def list_count_events(
     if event_type:
         query = query.where(CountEvent.event_type == event_type)
     query = query.order_by(CountEvent.id.desc()).limit(limit)
-
-    return [
-        event_to_response(event)
-        for event in database.scalars(query).all()
-    ]
+    return [event_to_response(event) for event in database.scalars(query).all()]
 
 
 @app.get(
@@ -405,13 +334,8 @@ def count_summary(
     if camera_name:
         query_base = query_base.where(Camera.name == camera_name.strip())
 
-    entries = database.scalar(
-        query_base.where(CountEvent.event_type == "IN")
-    ) or 0
-    exits = database.scalar(
-        query_base.where(CountEvent.event_type == "OUT")
-    ) or 0
-
+    entries = database.scalar(query_base.where(CountEvent.event_type == "IN")) or 0
+    exits = database.scalar(query_base.where(CountEvent.event_type == "OUT")) or 0
     return {
         "branch_id": branch_id,
         "camera_name": camera_name.strip() if camera_name else None,
@@ -421,11 +345,11 @@ def count_summary(
     }
 
 
-# Capas web y seguridad.
 from app.admin import router as admin_router
-from app.auth import WebAuthMiddleware, router as auth_router
+from app.auth import router as auth_router
 from app.dashboard import router as dashboard_router
 from app.reports import router as reports_router
+from app.security import WebAuthMiddleware
 
 app.add_middleware(WebAuthMiddleware)
 app.include_router(auth_router)
