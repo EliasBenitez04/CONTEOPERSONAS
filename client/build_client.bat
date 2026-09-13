@@ -26,7 +26,7 @@ pyinstaller --noconfirm --clean --onedir ^
   --collect-all torch ^
   --collect-all torchvision ^
   --hidden-import=cv2 ^
-  app\main.py
+  app\runner.py
 
 if errorlevel 1 (
     echo [BUILD] Error generando el cliente.
