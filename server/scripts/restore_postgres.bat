@@ -15,9 +15,8 @@ if not exist ".env" (
     exit /b 1
 )
 
-for /f "usebackq tokens=1,* delims==" %%A in (".env") do (
-    if not "%%A"=="" if not "%%A:~0,1"=="#" set "%%A=%%B"
-)
+for /f "usebackq eol=# tokens=1,* delims==" %%A in (".env") do set "%%A=%%B"
+
 if "%PG_HOST%"=="" set "PG_HOST=127.0.0.1"
 if "%PG_PORT%"=="" set "PG_PORT=5432"
 if "%PG_DATABASE%"=="" set "PG_DATABASE=contepersonas"
