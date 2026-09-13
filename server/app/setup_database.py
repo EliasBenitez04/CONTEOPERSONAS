@@ -17,7 +17,6 @@ def ensure_database_exists():
         password=settings.PG_PASSWORD,
         dbname="postgres"
     )
-
     connection.autocommit = True
 
     try:
@@ -26,20 +25,14 @@ def ensure_database_exists():
                 "SELECT 1 FROM pg_database WHERE datname = %s",
                 (settings.PG_DATABASE,)
             )
-
             exists = cursor.fetchone() is not None
 
             if not exists:
                 cursor.execute(
-                    sql.SQL(
-                        "CREATE DATABASE {} ENCODING 'UTF8'"
-                    ).format(
-                        sql.Identifier(
-                            settings.PG_DATABASE
-                        )
+                    sql.SQL("CREATE DATABASE {} ENCODING 'UTF8'").format(
+                        sql.Identifier(settings.PG_DATABASE)
                     )
                 )
-
                 print(
                     "[DB] Base PostgreSQL creada: "
                     f"{settings.PG_DATABASE}"
@@ -54,63 +47,42 @@ def ensure_database_exists():
 
 
 def create_tables():
-    Base.metadata.create_all(
-        bind=engine
-    )
-
+    Base.metadata.create_all(bind=engine)
     with engine.connect() as connection:
-        connection.execute(
-            text("SELECT 1")
-        )
+        connection.execute(text("SELECT 1"))
 
     print(
-        "[DB] Tablas verificadas: "
-        "users, branches, cameras, count_events"
+        "[DB] Tablas verificadas: users, branches, cameras, "
+        "client_devices, client_configs, count_events, audit_logs"
     )
 
 
 def ensure_initial_admin():
     database = SessionLocal()
-
     try:
         user_count = database.scalar(
             select(func.count(User.id))
         ) or 0
 
         if user_count > 0:
-            print(
-                f"[AUTH] Usuarios existentes: {user_count}"
-            )
+            print(f"[AUTH] Usuarios existentes: {user_count}")
             return
 
         admin = User(
             username=settings.ADMIN_USERNAME.lower(),
             full_name=settings.ADMIN_FULL_NAME,
-            password_hash=hash_password(
-                settings.ADMIN_PASSWORD
-            ),
+            password_hash=hash_password(settings.ADMIN_PASSWORD),
             role="ADMIN",
             active=True,
             must_change_password=True
         )
-
         database.add(admin)
         database.commit()
 
         print("[AUTH] Administrador inicial creado.")
-        print(
-            "[AUTH] Usuario temporal: "
-            f"{settings.ADMIN_USERNAME}"
-        )
-        print(
-            "[AUTH] Clave temporal:   "
-            f"{settings.ADMIN_PASSWORD}"
-        )
-        print(
-            "[AUTH] Se exigira cambiar la clave "
-            "en el primer ingreso."
-        )
-
+        print(f"[AUTH] Usuario temporal: {settings.ADMIN_USERNAME}")
+        print(f"[AUTH] Clave temporal:   {settings.ADMIN_PASSWORD}")
+        print("[AUTH] Se exigira cambiar la clave en el primer ingreso.")
     finally:
         database.close()
 
@@ -120,14 +92,10 @@ def main():
         "[DB] Preparando PostgreSQL "
         f"{settings.PG_HOST}:{settings.PG_PORT}"
     )
-
     ensure_database_exists()
     create_tables()
     ensure_initial_admin()
-
-    print(
-        "[DB] PostgreSQL listo para recibir conteos."
-    )
+    print("[DB] PostgreSQL V3 listo para recibir conteos.")
 
 
 if __name__ == "__main__":
