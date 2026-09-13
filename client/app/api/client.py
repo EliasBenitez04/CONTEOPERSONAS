@@ -76,7 +76,6 @@ class APIClient:
                 "data": data
             }
 
-        # count-events es idempotente por event_uuid.
         if response.status_code == 409 and path == "/count-events":
             return {
                 "success": True,
@@ -147,6 +146,33 @@ class APIClient:
         return self._request(
             "GET",
             "/client/config"
+        )
+
+    def bootstrap_remote_config(self, local_config: dict):
+        if not self.managed_client:
+            return {
+                "success": False,
+                "status_code": None,
+                "error": "Cliente no administrado",
+                "data": None
+            }
+
+        line = local_config.get("line", {})
+        confidence = float(local_config.get("confidence", 0.22))
+        payload = {
+            "line_x1": int(line.get("x1", 640)),
+            "line_y1": int(line.get("y1", 100)),
+            "line_x2": int(line.get("x2", 640)),
+            "line_y2": int(line.get("y2", 650)),
+            "in_side": 1 if int(local_config.get("in_side", 1)) >= 0 else -1,
+            "margin": max(1, int(local_config.get("margin", 18))),
+            "confidence": min(99, max(1, int(round(confidence * 100))))
+        }
+
+        return self._request(
+            "POST",
+            "/client/bootstrap-config",
+            payload
         )
 
     def close(self):
