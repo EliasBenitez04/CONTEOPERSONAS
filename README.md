@@ -1,51 +1,144 @@
-# CONTEOPERSONAS
+# CONTEOPERSONAS V3
 
-Sistema distribuido para conteo de personas por camaras RTSP.
+Sistema distribuido para conteo de personas por cámaras RTSP, diseñado para múltiples sucursales con operación offline y servidor central.
 
 ## Arquitectura
 
-- `client/`: captura RTSP, YOLO, tracking, conteo IN/OUT, SQLite local y sincronizacion offline.
-- `server/`: API central FastAPI para recibir, consultar y consolidar eventos.
+```text
+CAMARA RTSP -> CLIENTE PYTHON/YOLO -> SQLite local
+                                  -> HTTPS/API CENTRAL
+                                  -> PostgreSQL
+                                  -> Dashboard / Reportes
+```
 
-## Ejecutar servidor central
+Cada instalación V3 usa un `CLIENT_ID` y `CLIENT_TOKEN` propio. El servidor asocia ese cliente a una sucursal/cámara y controla remotamente línea, sentido IN/OUT, margen y confianza YOLO.
 
-Desde la raiz del proyecto:
+## Funcionalidades
+
+- YOLO + tracker local e IDs inmediatos.
+- Conteo IN / OUT.
+- SQLite offline con reintento automático.
+- PostgreSQL central.
+- FastAPI.
+- Dashboard en tiempo real.
+- Cámaras ONLINE/OFFLINE.
+- Telemetría de clientes, versión, pendientes y errores.
+- CRUD sucursales/cámaras.
+- Registro seguro de clientes por token individual.
+- Configuración remota.
+- Reportes por rango/sucursal/cámara y CSV.
+- Login, usuarios y roles ADMIN/SUPERVISOR/VIEWER.
+- Auditoría.
+- Backups PostgreSQL y retención.
+- Autoinicio en Windows.
+- Plantilla HTTPS con Caddy.
+- Script de empaquetado con PyInstaller.
+
+## Servidor
 
 ```powershell
 cd server
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+.\start_server.bat
 ```
 
-El servidor queda disponible en:
+Accesos locales:
 
-- API: `http://127.0.0.1:8000`
-- Salud: `http://127.0.0.1:8000/api/health`
-- Swagger: `http://127.0.0.1:8000/docs`
-- Eventos: `http://127.0.0.1:8000/api/count-events`
+- Login: `http://127.0.0.1:8000/login`
+- Dashboard: `http://127.0.0.1:8000/dashboard`
+- Sucursales: `http://127.0.0.1:8000/admin/branches`
+- Cámaras: `http://127.0.0.1:8000/admin/cameras`
+- Clientes: `http://127.0.0.1:8000/admin/clients`
+- Reportes: `http://127.0.0.1:8000/reports`
+- Usuarios: `http://127.0.0.1:8000/users`
+- Auditoría: `http://127.0.0.1:8000/admin/audit`
 
-El servidor usa SQLite de forma predeterminada para desarrollo y crea automaticamente `server/data/server.db`.
+PostgreSQL se prepara automáticamente mediante `app.setup_database`.
 
-Para PostgreSQL, copia `server/.env.example` a `server/.env` y cambia `DATABASE_URL`.
+## Cliente
 
-## Ejecutar cliente
-
-En otra terminal:
+Primera preparación:
 
 ```powershell
 cd client
-python -m app.main
+.\setup_client.bat
 ```
 
-El cliente guarda cada conteo primero en SQLite local. Luego intenta enviarlo a `POST /api/count-events`. Si el servidor esta fuera de linea, el evento permanece pendiente y se reintenta automaticamente.
+Configurar `client/.env` usando `.env.example`.
 
-## Endpoints principales
+Ejecutar:
 
-- `GET /api/health`
-- `POST /api/count-events`
-- `GET /api/count-events`
-- `GET /api/summary?branch_id=1&camera_name=CAMARA_01`
+```powershell
+.\run_client.bat
+```
 
-`event_uuid` es unico en el servidor, por lo que los reintentos del cliente no generan eventos duplicados.
+El cliente escribe también en `client/logs/client.log`.
+
+## Convertir un cliente a V3 administrado
+
+1. Crear/confirmar sucursal y cámara.
+2. Entrar a `/admin/clients`.
+3. Registrar cliente para esa cámara.
+4. Copiar el `CLIENT_ID` y `CLIENT_TOKEN` mostrados.
+5. Colocarlos en `client/.env` junto a la URL central.
+6. Reiniciar el cliente.
+7. Confirmar ONLINE, versión y pendientes en Dashboard/Clientes.
+
+## Multi-sucursal
+
+En PCs remotas usar una URL real del servidor, nunca `127.0.0.1`:
+
+```env
+API_URL=https://conteo.midominio.com/api
+CLIENT_ID=...
+CLIENT_TOKEN=...
+```
+
+## Automatización Windows
+
+Cliente:
+
+```powershell
+client\install_autostart.bat
+```
+
+Servidor y backup diario (ejecutar como Administrador):
+
+```powershell
+server\scripts\install_server_autostart.bat
+server\scripts\install_backup_task.bat
+```
+
+## Backups
+
+Manual:
+
+```powershell
+server\scripts\backup_postgres.bat
+```
+
+Restaurar:
+
+```powershell
+server\scripts\restore_postgres.bat "C:\ruta\contepersonas_fecha.backup"
+```
+
+## Producción / HTTPS
+
+Ver `deploy/PRODUCCION.md` y `deploy/Caddyfile.example`.
+
+En producción:
+- usar HTTPS;
+- `SESSION_COOKIE_SECURE=1`;
+- cambiar `SESSION_SECRET`;
+- `ENABLE_DOCS=0`;
+- restringir `TRUSTED_HOSTS`;
+- no exponer PostgreSQL a Internet;
+- usar un token distinto por cliente.
+
+## Empaquetado
+
+```powershell
+client\build_client.bat
+```
+
+Genera `client/dist/ContePersonas` en modo `onedir`.
