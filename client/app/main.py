@@ -47,7 +47,6 @@ def draw_direction_labels(frame, counter, line_p1, line_p2):
         in_pos = negative
         out_pos = positive
 
-    # Se conserva la convencion visual que ya usa el proyecto.
     cv2.putText(
         frame, "OUT", in_pos,
         cv2.FONT_HERSHEY_SIMPLEX, 0.90, (0, 70, 255), 3
@@ -101,6 +100,37 @@ def normalize_remote_config(remote):
     }
 
 
+def prepare_remote_config(api_client, current_config, remote):
+    branch_id = int(remote["branch_id"])
+    camera_name = str(remote["camera_name"])
+
+    if remote.get("bootstrap_required"):
+        print(
+            "[CONFIG] Primera vinculacion V3: publicando la "
+            "configuracion local calibrada."
+        )
+        bootstrap = api_client.bootstrap_remote_config(current_config)
+        if not bootstrap["success"]:
+            print(
+                "[CONFIG] No se pudo inicializar la configuracion central. "
+                f"HTTP={bootstrap['status_code']} | {bootstrap['error']}"
+            )
+            return current_config, branch_id, camera_name, False
+
+        remote = bootstrap["data"]
+        print(
+            "[CONFIG] Configuracion local adoptada por el servidor. "
+            f"Version={remote.get('config_version', 1)}"
+        )
+
+    return (
+        normalize_remote_config(remote),
+        branch_id,
+        camera_name,
+        True
+    )
+
+
 def main():
     print("=" * 60)
     print("SISTEMA DE CONTEO DE PERSONAS")
@@ -122,17 +152,21 @@ def main():
     if settings.MANAGED_CLIENT:
         initial_remote = api_client.get_remote_config()
         if initial_remote["success"]:
-            remote = initial_remote["data"]
-            runtime_branch_id = int(remote["branch_id"])
-            runtime_camera_name = str(remote["camera_name"])
-            config = normalize_remote_config(remote)
-            save_camera_config(config)
-            print(
-                "[CONFIG] Configuracion central aplicada al iniciar. "
-                f"Sucursal={runtime_branch_id} "
-                f"Camara={runtime_camera_name} "
-                f"Version={config['config_version']}"
+            config, runtime_branch_id, runtime_camera_name, applied = (
+                prepare_remote_config(
+                    api_client,
+                    config,
+                    initial_remote["data"]
+                )
             )
+            if applied:
+                save_camera_config(config)
+                print(
+                    "[CONFIG] Configuracion central activa. "
+                    f"Sucursal={runtime_branch_id} "
+                    f"Camara={runtime_camera_name} "
+                    f"Version={config.get('config_version', 0)}"
+                )
         else:
             print(
                 "[CONFIG] Servidor no disponible al iniciar; "
@@ -183,36 +217,47 @@ def main():
         for frame in camera.start():
             remote_update = synchronizer.pop_remote_config()
             if remote_update:
-                new_config = normalize_remote_config(remote_update)
-                runtime_branch_id = int(remote_update["branch_id"])
-                runtime_camera_name = str(remote_update["camera_name"])
-                config = new_config
-                save_camera_config(config)
+                config_candidate, branch_candidate, camera_candidate, applied = (
+                    prepare_remote_config(
+                        api_client,
+                        config,
+                        remote_update
+                    )
+                )
+                runtime_branch_id = branch_candidate
+                runtime_camera_name = camera_candidate
 
-                line_p1, line_p2 = get_line(config)
-                counter.set_line(line_p1, line_p2)
-                counter.set_in_side(config["in_side"], swap_counts=False)
-                counter.margin = config["margin"]
-                detector.set_confidence(config["confidence"])
-                detector.reset_tracker()
+                if applied:
+                    config = config_candidate
+                    save_camera_config(config)
 
-                updated_totals = database.get_today_totals(
-                    branch_id=runtime_branch_id,
-                    camera_name=runtime_camera_name
-                )
-                session_base_in = max(
-                    0,
-                    int(updated_totals["IN"]) - counter.entries
-                )
-                session_base_out = max(
-                    0,
-                    int(updated_totals["OUT"]) - counter.exits
-                )
+                    line_p1, line_p2 = get_line(config)
+                    counter.set_line(line_p1, line_p2)
+                    counter.set_in_side(
+                        config["in_side"],
+                        swap_counts=False
+                    )
+                    counter.margin = config["margin"]
+                    detector.set_confidence(config["confidence"])
+                    detector.reset_tracker()
 
-                print(
-                    "[CONFIG] Cambio remoto aplicado sin alterar "
-                    "el historial ya registrado."
-                )
+                    updated_totals = database.get_today_totals(
+                        branch_id=runtime_branch_id,
+                        camera_name=runtime_camera_name
+                    )
+                    session_base_in = max(
+                        0,
+                        int(updated_totals["IN"]) - counter.entries
+                    )
+                    session_base_out = max(
+                        0,
+                        int(updated_totals["OUT"]) - counter.exits
+                    )
+
+                    print(
+                        "[CONFIG] Cambio remoto aplicado sin alterar "
+                        "el historial ya registrado."
+                    )
 
             persons = detector.track(frame)
 
