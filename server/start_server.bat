@@ -31,12 +31,12 @@ if errorlevel 1 (
 if not exist ".env" (
     echo [SETUP] Creando server\.env desde .env.example...
     copy /Y ".env.example" ".env" >nul
-    echo [SETUP] Se creo .env con usuario postgres y clave postgres.
-    echo [SETUP] Si tu PostgreSQL usa otra clave, edita server\.env.
+    echo [SETUP] Se creo .env con configuracion inicial.
+    echo [SETUP] Si PostgreSQL usa otra clave, edita server\.env.
 )
 
 echo.
-echo [DB] Verificando PostgreSQL y estructura...
+echo [DB] Verificando PostgreSQL, estructura y usuarios...
 python -m app.setup_database
 
 if errorlevel 1 (
@@ -48,12 +48,13 @@ if errorlevel 1 (
 )
 
 echo.
-echo [SERVER] API: http://127.0.0.1:8000
+echo [SERVER] Login: http://127.0.0.1:8000/login
 echo [SERVER] Dashboard: http://127.0.0.1:8000/dashboard
 echo [SERVER] Sucursales: http://127.0.0.1:8000/admin/branches
 echo [SERVER] Camaras: http://127.0.0.1:8000/admin/cameras
 echo [SERVER] Reportes: http://127.0.0.1:8000/reports
-echo [SERVER] Health: http://127.0.0.1:8000/api/health
+echo [SERVER] Usuarios: http://127.0.0.1:8000/users
+echo [SERVER] API Health: http://127.0.0.1:8000/api/health
 echo [SERVER] Swagger: http://127.0.0.1:8000/docs
 echo.
 
