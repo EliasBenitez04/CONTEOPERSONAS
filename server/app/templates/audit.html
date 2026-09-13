@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Sistema Cámara - Auditoría</title>
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+<style>
+:root{--sidebar-width:245px}body{background:#f4f6f9;color:#1f2937}.sidebar{width:var(--sidebar-width);min-height:100vh;position:fixed;inset:0 auto 0 0;background:#111827;color:#fff;padding:22px 16px}.brand{font-weight:700;font-size:1.1rem;margin-bottom:28px}.sidebar .nav-link{color:#cbd5e1;border-radius:10px;margin-bottom:6px}.sidebar .nav-link.active,.sidebar .nav-link:hover{background:#1f2937;color:#fff}.main{margin-left:var(--sidebar-width);padding:24px}.panel-card{border:0;border-radius:16px;box-shadow:0 4px 18px rgba(15,23,42,.06)}@media(max-width:991px){.sidebar{position:static;width:100%;min-height:auto}.main{margin-left:0}}
+</style>
+</head>
+<body>
+<aside class="sidebar"><div class="brand"><i class="bi bi-camera-video me-2"></i>SISTEMA CÁMARA</div><nav class="nav flex-column">
+<a class="nav-link" href="/dashboard"><i class="bi bi-grid me-2"></i>Dashboard</a>
+<a class="nav-link" href="/admin/branches"><i class="bi bi-building me-2"></i>Sucursales</a>
+<a class="nav-link" href="/admin/cameras"><i class="bi bi-camera-video me-2"></i>Cámaras</a>
+<a class="nav-link" href="/admin/clients"><i class="bi bi-pc-display me-2"></i>Clientes</a>
+<a class="nav-link" href="/reports"><i class="bi bi-bar-chart-line me-2"></i>Reportes</a>
+<a class="nav-link" href="/users"><i class="bi bi-people me-2"></i>Usuarios</a>
+<a class="nav-link active" href="/admin/audit"><i class="bi bi-journal-text me-2"></i>Auditoría</a>
+<a class="nav-link" href="/logout"><i class="bi bi-box-arrow-left me-2"></i>Cerrar sesión</a></nav></aside>
+<main class="main"><div class="d-flex justify-content-between align-items-center mb-4"><div><h2 class="mb-1">Auditoría</h2><div class="text-secondary">Cambios administrativos y exportaciones realizadas por usuarios</div></div><button id="refresh" class="btn btn-dark"><i class="bi bi-arrow-clockwise"></i></button></div>
+<div class="card panel-card"><div class="card-body p-0"><div class="table-responsive"><table class="table table-hover mb-0"><thead class="table-light"><tr><th class="ps-4">Fecha</th><th>Usuario</th><th>Acción</th><th>HTTP</th><th>IP</th><th>Estado</th></tr></thead><tbody id="body"><tr><td colspan="6" class="text-center text-secondary py-4">Cargando...</td></tr></tbody></table></div></div></div></main>
+<script>
+function esc(v){return String(v??'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;')}
+async function load(){const r=await fetch('/api/admin/audit?limit=500');const b=document.getElementById('body');if(!r.ok){b.innerHTML='<tr><td colspan="6" class="text-center text-danger py-4">No se pudo cargar la auditoría.</td></tr>';return}const rows=await r.json();if(!rows.length){b.innerHTML='<tr><td colspan="6" class="text-center text-secondary py-4">Sin registros.</td></tr>';return}b.innerHTML=rows.map(x=>`<tr><td class="ps-4 small">${new Date(x.created_at).toLocaleString('es-PY')}</td><td>${esc(x.username||'Sistema')}</td><td><div class="fw-semibold">${esc(x.action)}</div><div class="small text-secondary">${esc(x.path||'')}</div></td><td>${esc(x.method||'-')}</td><td class="small">${esc(x.ip_address||'-')}</td><td><span class="badge ${x.status_code&&x.status_code<400?'text-bg-success':'text-bg-danger'}">${x.status_code??'-'}</span></td></tr>`).join('')}
+document.getElementById('refresh').onclick=load;load();
+</script></body></html>
