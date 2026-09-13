@@ -41,5 +41,26 @@ class Settings:
         ""
     )
 
+    API_TIMEOUT_SECONDS = int(
+        os.getenv(
+            "API_TIMEOUT_SECONDS",
+            "5"
+        )
+    )
+
+    SYNC_INTERVAL_SECONDS = int(
+        os.getenv(
+            "SYNC_INTERVAL_SECONDS",
+            "5"
+        )
+    )
+
+    SYNC_BATCH_SIZE = int(
+        os.getenv(
+            "SYNC_BATCH_SIZE",
+            "100"
+        )
+    )
+
 
 settings = Settings()
