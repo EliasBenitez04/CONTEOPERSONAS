@@ -24,7 +24,7 @@ Name: "autostart"; Description: "Iniciar ContePersonas al iniciar sesión en Win
 [Files]
 Source: "..\dist\ContePersonas\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "..\.env.example"; DestDir: "{app}"; DestName: ".env.example"; Flags: ignoreversion
-Source: "..\.env.example"; DestDir: "{app}"; DestName: ".env"; Flags: onlyifdoesntexist
+Source: "..\.env.example"; DestDir: "{app}"; DestName: ".env"; Flags: onlyifdoesntexist uninsneveruninstall
 
 [Dirs]
 Name: "{app}\data"
@@ -39,4 +39,4 @@ Filename: "notepad.exe"; Parameters: "{app}\.env"; Description: "Configurar cone
 
 [UninstallDelete]
 Type: filesandordirs; Name: "{app}\logs"
-; data y .env se conservan deliberadamente al desinstalar/actualizar.
+; SQLite y .env se conservan para evitar perdida accidental de pendientes/configuracion.
