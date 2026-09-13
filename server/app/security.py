@@ -5,6 +5,7 @@ from fastapi.responses import JSONResponse, RedirectResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.auth import session_user_from_request
+from app.config import settings
 from app.database import SessionLocal
 from app.models import AuditLog
 
@@ -35,6 +36,34 @@ class WebAuthMiddleware(BaseHTTPMiddleware):
 
     async def dispatch(self, request: Request, call_next):
         path = request.url.path
+
+        # V3: en produccion, el heartbeat antiguo deja de aceptar clientes
+        # y los conteos deben usar CLIENT_ID+CLIENT_TOKEN, salvo que el
+        # administrador haya habilitado deliberadamente API_TOKEN legacy.
+        if settings.ENVIRONMENT == "production":
+            if path == "/api/cameras/heartbeat":
+                return JSONResponse(
+                    status_code=status.HTTP_410_GONE,
+                    content={
+                        "detail": (
+                            "Heartbeat V2 deshabilitado. Registre el cliente "
+                            "desde Administracion > Clientes."
+                        )
+                    }
+                )
+
+            if (
+                path == "/api/count-events"
+                and not request.headers.get("X-Client-ID")
+                and not settings.API_TOKEN
+            ):
+                return JSONResponse(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    content={
+                        "detail": "CLIENT_ID y CLIENT_TOKEN requeridos en produccion"
+                    }
+                )
+
         protected = (
             path.startswith(self.AUTHENTICATED_PREFIXES)
             or path.startswith(self.SUPERVISOR_PREFIXES)
