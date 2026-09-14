@@ -44,18 +44,50 @@ Name: "{group}\ContePersonas"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{
 Name: "{userstartup}\ContePersonas"; Filename: "{sys}\wscript.exe"; Parameters: "//B //Nologo ""{app}\watchdog.vbs"""; WorkingDir: "{app}"; Tasks: autostart
 
 [Run]
-Filename: "notepad.exe"; Parameters: "{app}\.env"; Description: "Configurar conexión de cámara y servidor"; Flags: postinstall skipifsilent
-Filename: "{sys}\wscript.exe"; Parameters: "//B //Nologo ""{app}\watchdog.vbs"""; Description: "Iniciar ContePersonas en segundo plano"; WorkingDir: "{app}"; Flags: postinstall skipifsilent nowait
+; El bloqueo .installing sigue activo mientras se edita el .env, evitando que
+; un watchdog anterior relance el EXE con configuracion vieja.
+Filename: "notepad.exe"; Parameters: "{app}\.env"; Description: "Configurar conexión de cámara y servidor"; Flags: skipifsilent waituntilterminated
+Filename: "{cmd}"; Parameters: "/C del /F /Q ""{app}\.installing"" 2>nul"; Flags: runhidden waituntilterminated
+Filename: "{sys}\wscript.exe"; Parameters: "//B //Nologo ""{app}\watchdog.vbs"""; Description: "Iniciar ContePersonas"; WorkingDir: "{app}"; Flags: skipifsilent nowait
 
 [UninstallDelete]
 Type: filesandordirs; Name: "{app}\logs"
+Type: files; Name: "{app}\.installing"
 ; SQLite y .env se conservan para evitar perdida accidental de pendientes/configuracion.
 
 [Code]
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 var
   ResultCode: Integer;
+  PowerShellExe: String;
+  PowerShellParams: String;
+  LockFile: String;
 begin
+  ForceDirectories(ExpandConstant('{app}'));
+
+  // Bloquea cualquier relanzamiento mientras el usuario edita el .env.
+  LockFile := ExpandConstant('{app}\.installing');
+  SaveStringToFile(LockFile, 'installing', False);
+
+  // Detiene solamente los watchdog.vbs de ContePersonas que pudieran haber
+  // quedado vivos de una instalacion anterior. No mata otros scripts VBS.
+  PowerShellExe := ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe');
+  PowerShellParams :=
+    '-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command "' +
+    'Get-CimInstance Win32_Process | Where-Object { ' +
+    '($_.Name -eq ''wscript.exe'' -or $_.Name -eq ''cscript.exe'') -and ' +
+    '$_.CommandLine -like ''*ContePersonas*watchdog.vbs*'' } | ' +
+    'ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"';
+
+  Exec(
+    PowerShellExe,
+    PowerShellParams,
+    '',
+    SW_HIDE,
+    ewWaitUntilTerminated,
+    ResultCode
+  );
+
   // Cierra el ejecutable anterior para evitar archivos bloqueados y dos clientes.
   Exec(
     ExpandConstant('{sys}\taskkill.exe'),
@@ -77,4 +109,12 @@ begin
   );
 
   Result := '';
+end;
+
+procedure DeinitializeSetup();
+begin
+  // Si la instalacion se cancela o termina antes de [Run], no dejar el
+  // cliente bloqueado permanentemente.
+  if FileExists(ExpandConstant('{app}\.installing')) then
+    DeleteFile(ExpandConstant('{app}\.installing'));
 end;
