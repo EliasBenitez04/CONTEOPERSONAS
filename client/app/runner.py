@@ -1,5 +1,6 @@
 import ctypes
 import sys
+import traceback
 
 from app.main import main
 from app.utils.logging_setup import setup_client_logging
@@ -8,6 +9,7 @@ from app.utils.logging_setup import setup_client_logging
 _MUTEX_HANDLE = None
 _MUTEX_NAME = "Local\\SistemaCamara.ContePersonas"
 _ERROR_ALREADY_EXISTS = 183
+_EXIT_ALREADY_RUNNING = 20
 
 
 def acquire_single_instance() -> bool:
@@ -57,7 +59,16 @@ if __name__ == "__main__":
             "[CLIENT] Ya existe una instancia de ContePersonas. "
             "Esta ejecucion se cierra para evitar conteo duplicado."
         )
-        raise SystemExit(0)
+        raise SystemExit(_EXIT_ALREADY_RUNNING)
 
     print(f"[LOG] Archivo: {log_file}")
-    main()
+
+    try:
+        main()
+    except KeyboardInterrupt:
+        print("[CLIENT] Cierre solicitado por el usuario.")
+        raise SystemExit(0)
+    except Exception as error:
+        print(f"[FATAL] El cliente termino por un error no controlado: {error}")
+        traceback.print_exc()
+        raise SystemExit(1)
