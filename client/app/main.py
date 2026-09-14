@@ -1,7 +1,7 @@
 import cv2
 
 from app.camera.rtsp import RTSPCamera
-from app.config.settings import settings
+from app.config.settings import settings, ENV_FILE
 from app.config.camera_config import (
     load_camera_config,
     save_camera_config
@@ -131,11 +131,30 @@ def prepare_remote_config(api_client, current_config, remote):
     )
 
 
+def print_client_diagnostics():
+    print(f"[CLIENT] ENV: {ENV_FILE}")
+    print(f"[CLIENT] API: {settings.API_URL}")
+    if settings.MANAGED_CLIENT:
+        client_preview = settings.CLIENT_ID
+        if len(client_preview) > 12:
+            client_preview = f"{client_preview[:8]}...{client_preview[-4:]}"
+        print("[CLIENT] Modo V3 administrado: SI")
+        print(f"[CLIENT] CLIENT_ID: {client_preview}")
+        print("[CLIENT] CLIENT_TOKEN: configurado")
+    else:
+        print("[CLIENT] Modo V3 administrado: NO")
+        print(
+            "[CLIENT] CLIENT_ID/CLIENT_TOKEN faltantes. "
+            "El cliente no podra aparecer ONLINE en Clientes instalados."
+        )
+
+
 def main():
     print("=" * 60)
     print("SISTEMA DE CONTEO DE PERSONAS")
     print(f"CLIENTE V{settings.APP_VERSION}")
     print("=" * 60)
+    print_client_diagnostics()
 
     api_client = APIClient(
         base_url=settings.API_URL,
@@ -169,9 +188,25 @@ def main():
                 )
         else:
             print(
-                "[CONFIG] Servidor no disponible al iniciar; "
-                "se usa la configuracion local en cache."
+                "[CONFIG] No se pudo validar el cliente V3 al iniciar. "
+                f"HTTP={initial_remote['status_code']} | "
+                f"{initial_remote['error']}"
             )
+            if initial_remote["status_code"] in (401, 403):
+                print(
+                    "[CONFIG] Revise CLIENT_ID y CLIENT_TOKEN: deben ser "
+                    "los generados para ESTA camara en Administracion > Clientes."
+                )
+            elif initial_remote["status_code"] == 404:
+                print(
+                    "[CONFIG] Revise API_URL. Debe terminar en /api y el "
+                    "servidor debe estar actualizado a V3."
+                )
+            else:
+                print(
+                    "[CONFIG] Se continua con la configuracion local para "
+                    "mantener el conteo offline."
+                )
 
     camera = RTSPCamera(
         rtsp_url=settings.CAMERA_RTSP_URL,
@@ -217,47 +252,36 @@ def main():
         for frame in camera.start():
             remote_update = synchronizer.pop_remote_config()
             if remote_update:
-                config_candidate, branch_candidate, camera_candidate, applied = (
-                    prepare_remote_config(
-                        api_client,
-                        config,
-                        remote_update
-                    )
+                new_config = normalize_remote_config(remote_update)
+                runtime_branch_id = int(remote_update["branch_id"])
+                runtime_camera_name = str(remote_update["camera_name"])
+                config = new_config
+                save_camera_config(config)
+
+                line_p1, line_p2 = get_line(config)
+                counter.set_line(line_p1, line_p2)
+                counter.set_in_side(config["in_side"], swap_counts=False)
+                counter.set_margin(config["margin"])
+                detector.set_confidence(config["confidence"])
+                detector.reset_tracker()
+
+                updated_totals = database.get_today_totals(
+                    branch_id=runtime_branch_id,
+                    camera_name=runtime_camera_name
                 )
-                runtime_branch_id = branch_candidate
-                runtime_camera_name = camera_candidate
+                session_base_in = max(
+                    0,
+                    int(updated_totals["IN"]) - counter.entries
+                )
+                session_base_out = max(
+                    0,
+                    int(updated_totals["OUT"]) - counter.exits
+                )
 
-                if applied:
-                    config = config_candidate
-                    save_camera_config(config)
-
-                    line_p1, line_p2 = get_line(config)
-                    counter.set_line(line_p1, line_p2)
-                    counter.set_in_side(
-                        config["in_side"],
-                        swap_counts=False
-                    )
-                    counter.margin = config["margin"]
-                    detector.set_confidence(config["confidence"])
-                    detector.reset_tracker()
-
-                    updated_totals = database.get_today_totals(
-                        branch_id=runtime_branch_id,
-                        camera_name=runtime_camera_name
-                    )
-                    session_base_in = max(
-                        0,
-                        int(updated_totals["IN"]) - counter.entries
-                    )
-                    session_base_out = max(
-                        0,
-                        int(updated_totals["OUT"]) - counter.exits
-                    )
-
-                    print(
-                        "[CONFIG] Cambio remoto aplicado sin alterar "
-                        "el historial ya registrado."
-                    )
+                print(
+                    "[CONFIG] Cambio remoto aplicado sin alterar "
+                    "el historial ya registrado."
+                )
 
             persons = detector.track(frame)
 
