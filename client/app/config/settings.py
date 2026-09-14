@@ -28,13 +28,41 @@ def _env_bool(name: str, default: bool) -> bool:
     }
 
 
+def _env_int(name: str, default: int, minimum=None) -> int:
+    value = os.getenv(name)
+
+    try:
+        parsed = int(value.strip()) if value and value.strip() else int(default)
+    except (TypeError, ValueError):
+        parsed = int(default)
+
+    if minimum is not None:
+        parsed = max(int(minimum), parsed)
+
+    return parsed
+
+
+def _env_float(name: str, default: float, minimum=None) -> float:
+    value = os.getenv(name)
+
+    try:
+        parsed = float(value.strip()) if value and value.strip() else float(default)
+    except (TypeError, ValueError):
+        parsed = float(default)
+
+    if minimum is not None:
+        parsed = max(float(minimum), parsed)
+
+    return parsed
+
+
 class Settings:
     APP_VERSION = os.getenv("APP_VERSION", "3.0.0")
 
     CAMERA_NAME = os.getenv("CAMERA_NAME", "CAMARA_01")
     CAMERA_RTSP_URL = os.getenv("CAMERA_RTSP_URL", "")
-    RECONNECT_SECONDS = int(os.getenv("RECONNECT_SECONDS", "3"))
-    BRANCH_ID = int(os.getenv("BRANCH_ID", "1"))
+    RECONNECT_SECONDS = _env_int("RECONNECT_SECONDS", 3, minimum=1)
+    BRANCH_ID = _env_int("BRANCH_ID", 1, minimum=1)
 
     API_URL = os.getenv(
         "API_URL",
@@ -45,14 +73,18 @@ class Settings:
     CLIENT_TOKEN = os.getenv("CLIENT_TOKEN", "").strip()
     API_TOKEN = os.getenv("API_TOKEN", "").strip()
 
-    API_TIMEOUT_SECONDS = int(os.getenv("API_TIMEOUT_SECONDS", "5"))
-    SYNC_INTERVAL_SECONDS = int(os.getenv("SYNC_INTERVAL_SECONDS", "5"))
-    SYNC_BATCH_SIZE = int(os.getenv("SYNC_BATCH_SIZE", "100"))
-    HEARTBEAT_INTERVAL_SECONDS = int(
-        os.getenv("HEARTBEAT_INTERVAL_SECONDS", "20")
+    API_TIMEOUT_SECONDS = _env_int("API_TIMEOUT_SECONDS", 5, minimum=1)
+    SYNC_INTERVAL_SECONDS = _env_int("SYNC_INTERVAL_SECONDS", 5, minimum=1)
+    SYNC_BATCH_SIZE = _env_int("SYNC_BATCH_SIZE", 100, minimum=1)
+    HEARTBEAT_INTERVAL_SECONDS = _env_int(
+        "HEARTBEAT_INTERVAL_SECONDS",
+        20,
+        minimum=1
     )
-    REMOTE_CONFIG_INTERVAL_SECONDS = int(
-        os.getenv("REMOTE_CONFIG_INTERVAL_SECONDS", "30")
+    REMOTE_CONFIG_INTERVAL_SECONDS = _env_int(
+        "REMOTE_CONFIG_INTERVAL_SECONDS",
+        30,
+        minimum=1
     )
 
     # Produccion: sin consola y sin ventana de OpenCV.
@@ -61,17 +93,11 @@ class Settings:
 
     # Limita inferencias por segundo. La camara sigue capturando en un thread
     # separado y siempre se procesa el frame mas reciente.
-    PROCESS_FPS = max(
-        1.0,
-        float(os.getenv("PROCESS_FPS", "12"))
-    )
+    PROCESS_FPS = _env_float("PROCESS_FPS", 12.0, minimum=1.0)
 
     # Mantiene 640 por defecto para no sacrificar precision. Se puede bajar
     # desde .env si un equipo necesita ahorrar mas recursos.
-    YOLO_IMGSZ = max(
-        320,
-        int(os.getenv("YOLO_IMGSZ", "640"))
-    )
+    YOLO_IMGSZ = _env_int("YOLO_IMGSZ", 640, minimum=320)
 
     MANAGED_CLIENT = bool(CLIENT_ID and CLIENT_TOKEN)
 
