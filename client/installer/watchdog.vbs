@@ -22,7 +22,10 @@ Do
     End If
 
     command = Chr(34) & exePath & Chr(34)
-    exitCode = shell.Run(command, 0, True)
+
+    ' ContePersonas.exe esta compilado con --noconsole, por lo que usar
+    ' ventana normal no abre CMD. Esto permite que OpenCV muestre la camara.
+    exitCode = shell.Run(command, 1, True)
 
     ' Si ya existe otra instancia valida, este watchdog duplicado termina.
     If exitCode = EXIT_ALREADY_RUNNING Then
