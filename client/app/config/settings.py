@@ -6,7 +6,10 @@ from app.paths import CLIENT_DIR
 
 
 ENV_FILE = CLIENT_DIR / ".env"
-load_dotenv(ENV_FILE)
+# El .env local debe ser la fuente de verdad del cliente. override=True evita
+# que variables antiguas de Windows/PowerShell oculten CLIENT_ID/CLIENT_TOKEN
+# recién configurados.
+load_dotenv(ENV_FILE, override=True)
 
 
 class Settings:
