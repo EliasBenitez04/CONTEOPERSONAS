@@ -23,9 +23,7 @@ class PersonDetector:
         self.confidence = float(confidence)
         self.imgsz = int(imgsz)
 
-        self.cuda_enabled = bool(
-            torch.cuda.is_available()
-        )
+        self.cuda_enabled = bool(torch.cuda.is_available())
         self.device = 0 if self.cuda_enabled else "cpu"
         self.use_half = self.cuda_enabled
 
@@ -38,12 +36,48 @@ class PersonDetector:
         )
 
         print(f"[YOLO] Modelo cargado: {resolved_model}")
+        self._print_device()
+        print(f"[YOLO] Tamano de inferencia: {self.imgsz}")
+        print("[TRACKER] ID inmediato habilitado.")
+
+    def _print_device(self):
         if self.cuda_enabled:
             print("[YOLO] Dispositivo: CUDA / FP16")
         else:
             print("[YOLO] Dispositivo: CPU / FP32")
-        print(f"[YOLO] Tamano de inferencia: {self.imgsz}")
-        print("[TRACKER] ID inmediato habilitado.")
+
+    def _disable_cuda(self, reason):
+        if not self.cuda_enabled:
+            return
+
+        print(
+            "[YOLO] CUDA fallo en esta PC. "
+            "Se cambia automaticamente a CPU."
+        )
+        print(f"[YOLO] Motivo CUDA: {reason}")
+
+        self.cuda_enabled = False
+        self.device = "cpu"
+        self.use_half = False
+
+        try:
+            torch.cuda.empty_cache()
+        except Exception:
+            pass
+
+        self._print_device()
+
+    def _predict(self, frame):
+        return self.model.predict(
+            source=frame,
+            classes=[0],
+            conf=self.confidence,
+            imgsz=self.imgsz,
+            max_det=30,
+            verbose=False,
+            device=self.device,
+            half=self.use_half
+        )
 
     def set_confidence(self, confidence):
         value = float(confidence)
@@ -54,16 +88,14 @@ class PersonDetector:
         )
 
     def track(self, frame):
-        results = self.model.predict(
-            source=frame,
-            classes=[0],
-            conf=self.confidence,
-            imgsz=self.imgsz,
-            max_det=30,
-            verbose=False,
-            device=self.device,
-            half=self.use_half
-        )
+        try:
+            results = self._predict(frame)
+        except Exception as error:
+            if not self.cuda_enabled:
+                raise
+
+            self._disable_cuda(error)
+            results = self._predict(frame)
 
         detections = []
         if not results:
