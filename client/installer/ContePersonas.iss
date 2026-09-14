@@ -44,8 +44,6 @@ Name: "{group}\ContePersonas"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{
 Name: "{userstartup}\ContePersonas"; Filename: "{sys}\wscript.exe"; Parameters: "//B //Nologo ""{app}\watchdog.vbs"""; WorkingDir: "{app}"; Tasks: autostart
 
 [Run]
-; Intenta eliminar la tarea programada usada por versiones antiguas.
-Filename: "{sys}\schtasks.exe"; Parameters: "/Delete /TN ""SistemaCamara_Cliente"" /F"; Flags: runhidden waituntilterminated ignoreerrors
 Filename: "notepad.exe"; Parameters: "{app}\.env"; Description: "Configurar conexión de cámara y servidor"; Flags: postinstall skipifsilent
 Filename: "{sys}\wscript.exe"; Parameters: "//B //Nologo ""{app}\watchdog.vbs"""; Description: "Iniciar ContePersonas en segundo plano"; WorkingDir: "{app}"; Flags: postinstall skipifsilent nowait
 
