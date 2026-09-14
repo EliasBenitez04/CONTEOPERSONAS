@@ -7,12 +7,16 @@ from app.config.camera_config import (
     save_camera_config
 )
 from app.gui.line_config import LineConfigurator
+from app.gui.tray import TrayController
 from app.detection.detector import PersonDetector
 from app.detection.counter import LineCounter
 from app.database.database import LocalDatabase, AsyncEventWriter
 from app.database.models import CountEvent
 from app.api.client import APIClient
 from app.api.sync import EventSynchronizer
+
+
+WINDOW_TITLE = "ContePersonas - Sistema Camara"
 
 
 def get_line(config):
@@ -135,8 +139,12 @@ def print_client_diagnostics():
     print(f"[CLIENT] ENV: {ENV_FILE}")
     print(f"[CLIENT] API: {settings.API_URL}")
     print(
-        "[CLIENT] Segundo plano: "
+        "[CLIENT] Segundo plano total: "
         f"{'SI' if settings.HEADLESS else 'NO'}"
+    )
+    print(
+        "[CLIENT] Bandeja de Windows: "
+        f"{'SI' if settings.TRAY_MODE and not settings.HEADLESS else 'NO'}"
     )
     print(
         "[CLIENT] Inferencia maxima: "
@@ -259,8 +267,26 @@ def main():
     print(f"     Salidas:  {session_base_out}")
     print("[SESION] Contadores iniciados en 0 / 0.")
 
+    tray = None
+    window_hidden = False
+    restore_pending = False
+
+    if not settings.HEADLESS and settings.TRAY_MODE:
+        tray = TrayController(WINDOW_TITLE)
+        tray.start()
+
     try:
         for frame in camera.start():
+            if tray is not None:
+                if tray.exit_requested():
+                    print("[TRAY] Salida solicitada desde el icono.")
+                    break
+
+                if tray.consume_show_request():
+                    window_hidden = False
+                    restore_pending = True
+                    print("[TRAY] Restaurando ventana.")
+
             remote_update = synchronizer.pop_remote_config()
             if remote_update:
                 new_config = normalize_remote_config(remote_update)
@@ -294,9 +320,14 @@ def main():
                     "el historial ya registrado."
                 )
 
+            render_view = (
+                not settings.HEADLESS
+                and not window_hidden
+            )
+
             persons = detector.track(frame)
 
-            if not settings.HEADLESS:
+            if render_view:
                 cv2.line(
                     frame,
                     line_p1,
@@ -316,7 +347,7 @@ def main():
                 point = person["point"]
                 event = counter.update(track_id, point)
 
-                if not settings.HEADLESS:
+                if render_view:
                     x1 = person["x1"]
                     y1 = person["y1"]
                     x2 = person["x2"]
@@ -360,6 +391,10 @@ def main():
             if settings.HEADLESS:
                 continue
 
+            if window_hidden:
+                cv2.waitKey(1)
+                continue
+
             today_in = session_base_in + counter.entries
             today_out = session_base_out + counter.exits
             draw_panel(
@@ -370,11 +405,19 @@ def main():
                 today_out
             )
 
-            footer = (
-                "Configuracion remota | Q: salir"
-                if settings.MANAGED_CLIENT
-                else "C: configurar linea | Q: salir"
-            )
+            if settings.TRAY_MODE:
+                footer = (
+                    "Minimizar/X: iconos ocultos | Q: salir"
+                    if settings.MANAGED_CLIENT
+                    else "C: configurar linea | Minimizar/X: iconos ocultos | Q: salir"
+                )
+            else:
+                footer = (
+                    "Configuracion remota | Q: salir"
+                    if settings.MANAGED_CLIENT
+                    else "C: configurar linea | Q: salir"
+                )
+
             cv2.putText(
                 frame,
                 footer,
@@ -385,8 +428,24 @@ def main():
                 2
             )
 
-            cv2.imshow(runtime_camera_name, frame)
+            cv2.imshow(WINDOW_TITLE, frame)
             key = cv2.waitKey(1) & 0xFF
+
+            if tray is not None:
+                if restore_pending:
+                    tray.restore_window()
+                    restore_pending = False
+
+                if tray.is_minimized():
+                    tray.hide_window()
+                    window_hidden = True
+                    print("[TRAY] Ventana minimizada a iconos ocultos.")
+                    continue
+
+                if not tray.window_exists():
+                    window_hidden = True
+                    print("[TRAY] Ventana cerrada: continua en iconos ocultos.")
+                    continue
 
             if key == ord("q"):
                 break
@@ -453,6 +512,9 @@ def main():
         camera.stop()
         event_writer.close()
         synchronizer.close(final_sync=True)
+
+        if tray is not None:
+            tray.stop()
 
         if not settings.HEADLESS:
             cv2.destroyAllWindows()
