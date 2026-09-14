@@ -58,7 +58,7 @@ function PrepareToInstall(var NeedsRestart: Boolean): String;
 var
   ResultCode: Integer;
 begin
-  ; Cierra el ejecutable anterior para evitar archivos bloqueados y dos clientes.
+  // Cierra el ejecutable anterior para evitar archivos bloqueados y dos clientes.
   Exec(
     ExpandConstant('{sys}\taskkill.exe'),
     '/F /IM ContePersonas.exe',
@@ -68,7 +68,7 @@ begin
     ResultCode
   );
 
-  ; Compatibilidad con instalaciones antiguas basadas en Task Scheduler.
+  // Compatibilidad con instalaciones antiguas basadas en Task Scheduler.
   Exec(
     ExpandConstant('{sys}\schtasks.exe'),
     '/Delete /TN "SistemaCamara_Cliente" /F',
