@@ -86,6 +86,11 @@ class TrayController:
         self._thread = None
 
     def _on_show(self, icon=None, item=None):
+        # Si la ventana sigue existiendo pero esta minimizada/oculta, se
+        # restaura inmediatamente desde el thread del icono. El evento queda
+        # marcado igualmente para que el bucle principal pueda recrearla si
+        # OpenCV la destruyo al pulsar X.
+        self.restore_window()
         self._show_requested.set()
 
     def _on_exit(self, icon=None, item=None):
