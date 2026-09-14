@@ -8,7 +8,7 @@ if not exist ".venv\Scripts\python.exe" (
 )
 
 call ".venv\Scripts\activate.bat"
-python -m pip install pyinstaller
+python -m pip install -r requirements.txt pyinstaller
 if errorlevel 1 exit /b 1
 
 if not exist "yolov8n.pt" (
@@ -25,6 +25,8 @@ pyinstaller --noconfirm --clean --onedir --noconsole ^
   --collect-all ultralytics ^
   --collect-all torch ^
   --collect-all torchvision ^
+  --collect-all pystray ^
+  --collect-all PIL ^
   --hidden-import=cv2 ^
   app\runner.py
 
