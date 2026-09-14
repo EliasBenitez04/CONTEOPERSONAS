@@ -134,6 +134,15 @@ def prepare_remote_config(api_client, current_config, remote):
 def print_client_diagnostics():
     print(f"[CLIENT] ENV: {ENV_FILE}")
     print(f"[CLIENT] API: {settings.API_URL}")
+    print(
+        "[CLIENT] Segundo plano: "
+        f"{'SI' if settings.HEADLESS else 'NO'}"
+    )
+    print(
+        "[CLIENT] Inferencia maxima: "
+        f"{settings.PROCESS_FPS:g} FPS"
+    )
+
     if settings.MANAGED_CLIENT:
         client_preview = settings.CLIENT_ID
         if len(client_preview) > 12:
@@ -210,13 +219,15 @@ def main():
 
     camera = RTSPCamera(
         rtsp_url=settings.CAMERA_RTSP_URL,
-        reconnect_seconds=settings.RECONNECT_SECONDS
+        reconnect_seconds=settings.RECONNECT_SECONDS,
+        max_fps=settings.PROCESS_FPS,
+        copy_frame=not settings.HEADLESS
     )
 
     detector = PersonDetector(
         model_path="yolov8n.pt",
         confidence=float(config.get("confidence", 0.22)),
-        imgsz=640
+        imgsz=settings.YOLO_IMGSZ
     )
 
     line_p1, line_p2 = get_line(config)
@@ -285,30 +296,55 @@ def main():
 
             persons = detector.track(frame)
 
-            cv2.line(frame, line_p1, line_p2, (255, 0, 255), 3)
-            draw_direction_labels(frame, counter, line_p1, line_p2)
+            if not settings.HEADLESS:
+                cv2.line(
+                    frame,
+                    line_p1,
+                    line_p2,
+                    (255, 0, 255),
+                    3
+                )
+                draw_direction_labels(
+                    frame,
+                    counter,
+                    line_p1,
+                    line_p2
+                )
 
             for person in persons:
                 track_id = person["id"]
                 point = person["point"]
                 event = counter.update(track_id, point)
 
-                x1 = person["x1"]
-                y1 = person["y1"]
-                x2 = person["x2"]
-                y2 = person["y2"]
+                if not settings.HEADLESS:
+                    x1 = person["x1"]
+                    y1 = person["y1"]
+                    x2 = person["x2"]
+                    y2 = person["y2"]
 
-                cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
-                cv2.circle(frame, point, 6, (0, 0, 255), -1)
-                cv2.putText(
-                    frame,
-                    f"ID {track_id} {person['confidence']:.2f}",
-                    (x1, max(22, y1 - 10)),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.62,
-                    (0, 255, 0),
-                    2
-                )
+                    cv2.rectangle(
+                        frame,
+                        (x1, y1),
+                        (x2, y2),
+                        (0, 255, 0),
+                        2
+                    )
+                    cv2.circle(
+                        frame,
+                        point,
+                        6,
+                        (0, 0, 255),
+                        -1
+                    )
+                    cv2.putText(
+                        frame,
+                        f"ID {track_id} {person['confidence']:.2f}",
+                        (x1, max(22, y1 - 10)),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.62,
+                        (0, 255, 0),
+                        2
+                    )
 
                 if event:
                     print(f"[CONTEO] ID {track_id}: {event}")
@@ -320,6 +356,9 @@ def main():
                     )
                     event_writer.enqueue(count_event)
                     synchronizer.notify_new_event()
+
+            if settings.HEADLESS:
+                continue
 
             today_in = session_base_in + counter.entries
             today_out = session_base_out + counter.exits
@@ -414,7 +453,9 @@ def main():
         camera.stop()
         event_writer.close()
         synchronizer.close(final_sync=True)
-        cv2.destroyAllWindows()
+
+        if not settings.HEADLESS:
+            cv2.destroyAllWindows()
 
 
 if __name__ == "__main__":

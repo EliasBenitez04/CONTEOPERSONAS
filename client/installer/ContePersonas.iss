@@ -19,11 +19,11 @@ ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 
 [Tasks]
-Name: "autostart"; Description: "Iniciar ContePersonas al iniciar sesión en Windows y reiniciarlo si falla"; GroupDescription: "Inicio automático:"; Flags: unchecked
+Name: "autostart"; Description: "Iniciar ContePersonas al iniciar sesión en Windows y reiniciarlo si falla"; GroupDescription: "Inicio automático:"
 
 [Files]
 Source: "..\dist\ContePersonas\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
-Source: "watchdog.bat"; DestDir: "{app}"; Flags: ignoreversion
+Source: "watchdog.vbs"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\.env.example"; DestDir: "{app}"; DestName: ".env.example"; Flags: ignoreversion
 Source: "..\.env.example"; DestDir: "{app}"; DestName: ".env"; Flags: onlyifdoesntexist uninsneveruninstall
 
@@ -33,10 +33,11 @@ Name: "{app}\logs"
 
 [Icons]
 Name: "{group}\ContePersonas"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"
-Name: "{userstartup}\ContePersonas"; Filename: "{app}\watchdog.bat"; WorkingDir: "{app}"; Tasks: autostart
+Name: "{userstartup}\ContePersonas"; Filename: "{sys}\wscript.exe"; Parameters: "//B //Nologo ""{app}\watchdog.vbs"""; WorkingDir: "{app}"; Tasks: autostart
 
 [Run]
-Filename: "notepad.exe"; Parameters: "{app}\.env"; Description: "Configurar conexión de cámara y servidor"; Flags: postinstall skipifsilent nowait
+Filename: "notepad.exe"; Parameters: "{app}\.env"; Description: "Configurar conexión de cámara y servidor"; Flags: postinstall skipifsilent
+Filename: "{sys}\wscript.exe"; Parameters: "//B //Nologo ""{app}\watchdog.vbs"""; Description: "Iniciar ContePersonas en segundo plano"; WorkingDir: "{app}"; Flags: postinstall skipifsilent nowait
 
 [UninstallDelete]
 Type: filesandordirs; Name: "{app}\logs"

@@ -19,7 +19,7 @@ if not exist "yolov8n.pt" (
 rmdir /S /Q build 2>nul
 rmdir /S /Q dist\ContePersonas 2>nul
 
-pyinstaller --noconfirm --clean --onedir ^
+pyinstaller --noconfirm --clean --onedir --noconsole ^
   --name ContePersonas ^
   --add-data "yolov8n.pt;." ^
   --collect-all ultralytics ^

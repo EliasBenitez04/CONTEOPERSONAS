@@ -8,8 +8,24 @@ from app.paths import CLIENT_DIR
 ENV_FILE = CLIENT_DIR / ".env"
 # El .env local debe ser la fuente de verdad del cliente. override=True evita
 # que variables antiguas de Windows/PowerShell oculten CLIENT_ID/CLIENT_TOKEN
-# recién configurados.
+# recien configurados.
 load_dotenv(ENV_FILE, override=True)
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return bool(default)
+
+    return value.strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "y",
+        "si",
+        "sí",
+        "on"
+    }
 
 
 class Settings:
@@ -37,6 +53,24 @@ class Settings:
     )
     REMOTE_CONFIG_INTERVAL_SECONDS = int(
         os.getenv("REMOTE_CONFIG_INTERVAL_SECONDS", "30")
+    )
+
+    # Produccion: sin consola y sin ventana de OpenCV.
+    # Para calibracion local se puede usar HEADLESS=false temporalmente.
+    HEADLESS = _env_bool("HEADLESS", True)
+
+    # Limita inferencias por segundo. La camara sigue capturando en un thread
+    # separado y siempre se procesa el frame mas reciente.
+    PROCESS_FPS = max(
+        1.0,
+        float(os.getenv("PROCESS_FPS", "12"))
+    )
+
+    # Mantiene 640 por defecto para no sacrificar precision. Se puede bajar
+    # desde .env si un equipo necesita ahorrar mas recursos.
+    YOLO_IMGSZ = max(
+        320,
+        int(os.getenv("YOLO_IMGSZ", "640"))
     )
 
     MANAGED_CLIENT = bool(CLIENT_ID and CLIENT_TOKEN)

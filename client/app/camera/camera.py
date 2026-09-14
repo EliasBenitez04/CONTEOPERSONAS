@@ -143,7 +143,7 @@ class Camera:
                 self.frame = frame
                 self.last_frame_time = time.time()
 
-    def read(self):
+    def read(self, copy_frame: bool = True):
 
         with self.lock:
 
@@ -160,10 +160,12 @@ class Camera:
 
                 return False, None
 
-            return (
-                True,
-                self.frame.copy()
-            )
+            frame = self.frame
+
+            if copy_frame:
+                frame = frame.copy()
+
+            return True, frame
 
     def disconnect(self):
 
@@ -188,7 +190,7 @@ class Camera:
 
         self.thread = None
 
-        # Recién ahora liberamos OpenCV
+        # Recien ahora liberamos OpenCV
         capture = self.capture
         self.capture = None
 

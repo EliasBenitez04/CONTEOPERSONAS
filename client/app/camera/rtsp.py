@@ -8,7 +8,9 @@ class RTSPCamera:
     def __init__(
         self,
         rtsp_url: str,
-        reconnect_seconds: int = 3
+        reconnect_seconds: int = 3,
+        max_fps: float = 0,
+        copy_frame: bool = True
     ):
 
         self.camera = Camera(
@@ -19,11 +21,23 @@ class RTSPCamera:
             reconnect_seconds
         )
 
+        self.max_fps = max(
+            0.0,
+            float(max_fps)
+        )
+        self.frame_interval = (
+            1.0 / self.max_fps
+            if self.max_fps > 0
+            else 0.0
+        )
+        self.copy_frame = bool(copy_frame)
+
         self.running = False
 
     def start(self):
 
         self.running = True
+        next_frame_at = 0.0
 
         while self.running:
 
@@ -46,8 +60,19 @@ class RTSPCamera:
 
                     continue
 
+                next_frame_at = 0.0
+
+            if self.frame_interval > 0:
+                now = time.monotonic()
+                if next_frame_at > now:
+                    time.sleep(
+                        next_frame_at - now
+                    )
+
             success, frame = (
-                self.camera.read()
+                self.camera.read(
+                    copy_frame=self.copy_frame
+                )
             )
 
             if not success:
@@ -65,10 +90,13 @@ class RTSPCamera:
 
                 continue
 
-            yield frame
+            if self.frame_interval > 0:
+                next_frame_at = (
+                    time.monotonic()
+                    + self.frame_interval
+                )
 
-            # Evita bucle excesivamente agresivo
-            time.sleep(0.001)
+            yield frame
 
     def stop(self):
 

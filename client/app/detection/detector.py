@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import torch
 from ultralytics import YOLO
 
 from app.detection.tracker import Tracker
@@ -21,12 +22,27 @@ class PersonDetector:
         self.model = YOLO(str(resolved_model))
         self.confidence = float(confidence)
         self.imgsz = int(imgsz)
+
+        self.cuda_enabled = bool(
+            torch.cuda.is_available()
+        )
+        self.device = 0 if self.cuda_enabled else "cpu"
+        self.use_half = self.cuda_enabled
+
+        if self.cuda_enabled:
+            torch.backends.cudnn.benchmark = True
+
         self.tracker = Tracker(
             max_missing=15,
             max_distance=170
         )
 
         print(f"[YOLO] Modelo cargado: {resolved_model}")
+        if self.cuda_enabled:
+            print("[YOLO] Dispositivo: CUDA / FP16")
+        else:
+            print("[YOLO] Dispositivo: CPU / FP32")
+        print(f"[YOLO] Tamano de inferencia: {self.imgsz}")
         print("[TRACKER] ID inmediato habilitado.")
 
     def set_confidence(self, confidence):
@@ -44,7 +60,9 @@ class PersonDetector:
             conf=self.confidence,
             imgsz=self.imgsz,
             max_det=30,
-            verbose=False
+            verbose=False,
+            device=self.device,
+            half=self.use_half
         )
 
         detections = []
