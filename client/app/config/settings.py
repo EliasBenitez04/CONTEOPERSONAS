@@ -87,9 +87,11 @@ class Settings:
         minimum=1
     )
 
-    # Produccion: sin consola y sin ventana de OpenCV.
-    # Para calibracion local se puede usar HEADLESS=false temporalmente.
-    HEADLESS = _env_bool("HEADLESS", True)
+    # Modo visual por defecto: muestra la camara y permite minimizarla
+    # al area de iconos ocultos. HEADLESS=true sigue disponible si alguna
+    # sucursal necesita funcionar sin interfaz grafica.
+    HEADLESS = _env_bool("HEADLESS", False)
+    TRAY_MODE = _env_bool("TRAY_MODE", True)
 
     # Limita inferencias por segundo. La camara sigue capturando en un thread
     # separado y siempre se procesa el frame mas reciente.
