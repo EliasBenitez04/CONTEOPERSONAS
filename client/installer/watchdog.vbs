@@ -7,6 +7,7 @@ Dim shell
 Dim fso
 Dim appDir
 Dim exePath
+Dim lockPath
 Dim command
 Dim exitCode
 
@@ -15,9 +16,15 @@ Set fso = CreateObject("Scripting.FileSystemObject")
 
 appDir = fso.GetParentFolderName(WScript.ScriptFullName)
 exePath = fso.BuildPath(appDir, "ContePersonas.exe")
+lockPath = fso.BuildPath(appDir, ".installing")
 shell.CurrentDirectory = appDir
 
 Do
+    ' Durante una instalacion/actualizacion no se debe relanzar el cliente.
+    If fso.FileExists(lockPath) Then
+        WScript.Quit 0
+    End If
+
     If Not fso.FileExists(exePath) Then
         WScript.Quit 0
     End If
@@ -35,6 +42,11 @@ Do
 
     ' Si ya existe otra instancia valida, este watchdog duplicado termina.
     If exitCode = EXIT_ALREADY_RUNNING Then
+        WScript.Quit 0
+    End If
+
+    ' Si comenzo una actualizacion mientras el EXE estaba activo, termina.
+    If fso.FileExists(lockPath) Then
         WScript.Quit 0
     End If
 
