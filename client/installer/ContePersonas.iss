@@ -21,6 +21,14 @@ ArchitecturesInstallIn64BitMode=x64compatible
 [Tasks]
 Name: "autostart"; Description: "Iniciar ContePersonas al iniciar sesión en Windows y reiniciarlo si falla"; GroupDescription: "Inicio automático:"
 
+[InstallDelete]
+; Limpia restos de versiones antiguas antes de crear el nuevo autoinicio.
+Type: files; Name: "{userstartup}\ContePersonas.lnk"
+Type: files; Name: "{app}\watchdog.bat"
+Type: files; Name: "{app}\run_client_task.bat"
+Type: files; Name: "{app}\run_client.bat"
+Type: files; Name: "{app}\install_autostart.bat"
+
 [Files]
 Source: "..\dist\ContePersonas\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "watchdog.vbs"; DestDir: "{app}"; Flags: ignoreversion
@@ -36,9 +44,39 @@ Name: "{group}\ContePersonas"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{
 Name: "{userstartup}\ContePersonas"; Filename: "{sys}\wscript.exe"; Parameters: "//B //Nologo ""{app}\watchdog.vbs"""; WorkingDir: "{app}"; Tasks: autostart
 
 [Run]
+; Intenta eliminar la tarea programada usada por versiones antiguas.
+Filename: "{sys}\schtasks.exe"; Parameters: "/Delete /TN ""SistemaCamara_Cliente"" /F"; Flags: runhidden waituntilterminated ignoreerrors
 Filename: "notepad.exe"; Parameters: "{app}\.env"; Description: "Configurar conexión de cámara y servidor"; Flags: postinstall skipifsilent
 Filename: "{sys}\wscript.exe"; Parameters: "//B //Nologo ""{app}\watchdog.vbs"""; Description: "Iniciar ContePersonas en segundo plano"; WorkingDir: "{app}"; Flags: postinstall skipifsilent nowait
 
 [UninstallDelete]
 Type: filesandordirs; Name: "{app}\logs"
 ; SQLite y .env se conservan para evitar perdida accidental de pendientes/configuracion.
+
+[Code]
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+var
+  ResultCode: Integer;
+begin
+  ; Cierra el ejecutable anterior para evitar archivos bloqueados y dos clientes.
+  Exec(
+    ExpandConstant('{sys}\taskkill.exe'),
+    '/F /IM ContePersonas.exe',
+    '',
+    SW_HIDE,
+    ewWaitUntilTerminated,
+    ResultCode
+  );
+
+  ; Compatibilidad con instalaciones antiguas basadas en Task Scheduler.
+  Exec(
+    ExpandConstant('{sys}\schtasks.exe'),
+    '/Delete /TN "SistemaCamara_Cliente" /F',
+    '',
+    SW_HIDE,
+    ewWaitUntilTerminated,
+    ResultCode
+  );
+
+  Result := '';
+end;
