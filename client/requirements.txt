@@ -2,3 +2,5 @@ opencv-python
 python-dotenv
 requests
 ultralytics
+pystray
+pillow
