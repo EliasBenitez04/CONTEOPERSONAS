@@ -139,6 +139,17 @@ def _config_payload(client: ClientDevice, config: ClientConfig):
     }
 
 
+def _apply_config_values(config: ClientConfig, payload: ClientConfigPayload):
+    config.line_x1 = payload.line_x1
+    config.line_y1 = payload.line_y1
+    config.line_x2 = payload.line_x2
+    config.line_y2 = payload.line_y2
+    config.in_side = 1 if payload.in_side >= 0 else -1
+    config.margin = payload.margin
+    config.confidence = payload.confidence
+    config.updated_at = datetime.now(timezone.utc)
+
+
 def client_to_dict(client: ClientDevice):
     config = client.config
     return {
@@ -270,7 +281,6 @@ def admin_create_client(
             in_side=1,
             margin=18,
             confidence=22,
-            # Version 0 = el primer cliente adopta su configuracion local.
             config_version=0
         )
         database.add(config)
@@ -318,15 +328,8 @@ def admin_update_client_config(
         config = ClientConfig(client_device_id=client.id, config_version=0)
         database.add(config)
 
-    config.line_x1 = payload.line_x1
-    config.line_y1 = payload.line_y1
-    config.line_x2 = payload.line_x2
-    config.line_y2 = payload.line_y2
-    config.in_side = 1 if payload.in_side >= 0 else -1
-    config.margin = payload.margin
-    config.confidence = payload.confidence
+    _apply_config_values(config, payload)
     config.config_version = max(1, int(config.config_version or 0) + 1)
-    config.updated_at = datetime.now(timezone.utc)
     database.commit()
 
     return {
@@ -395,6 +398,44 @@ def client_config(
     return _config_payload(client, config)
 
 
+@router.put("/api/client/config")
+def client_update_config(
+    payload: ClientConfigPayload,
+    client: ClientDevice | None = Depends(resolve_machine_auth),
+    database: Session = Depends(get_database)
+):
+    if client is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="CLIENT_ID requerido para actualizar configuracion"
+        )
+
+    managed_client = database.scalar(
+        select(ClientDevice)
+        .options(
+            selectinload(ClientDevice.branch),
+            selectinload(ClientDevice.camera),
+            selectinload(ClientDevice.config)
+        )
+        .where(ClientDevice.id == client.id)
+    )
+
+    config = managed_client.config
+    if config is None:
+        config = ClientConfig(
+            client_device_id=managed_client.id,
+            config_version=0
+        )
+        database.add(config)
+
+    _apply_config_values(config, payload)
+    config.config_version = max(1, int(config.config_version or 0) + 1)
+    database.commit()
+    database.refresh(config)
+
+    return _config_payload(managed_client, config)
+
+
 @router.post("/api/client/bootstrap-config")
 def bootstrap_client_config(
     payload: ClientConfigPayload,
@@ -430,15 +471,8 @@ def bootstrap_client_config(
             detail="La configuracion central ya fue inicializada"
         )
 
-    config.line_x1 = payload.line_x1
-    config.line_y1 = payload.line_y1
-    config.line_x2 = payload.line_x2
-    config.line_y2 = payload.line_y2
-    config.in_side = 1 if payload.in_side >= 0 else -1
-    config.margin = payload.margin
-    config.confidence = payload.confidence
+    _apply_config_values(config, payload)
     config.config_version = 1
-    config.updated_at = datetime.now(timezone.utc)
     database.commit()
     database.refresh(config)
 
