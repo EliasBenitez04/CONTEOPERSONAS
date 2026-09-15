@@ -93,13 +93,30 @@ class Settings:
     HEADLESS = _env_bool("HEADLESS", False)
     TRAY_MODE = _env_bool("TRAY_MODE", True)
 
-    # Limita inferencias por segundo. La camara sigue capturando en un thread
-    # separado y siempre se procesa el frame mas reciente.
+    # Perfil visual. Conserva la frecuencia actual para calibracion y pruebas.
     PROCESS_FPS = _env_float("PROCESS_FPS", 12.0, minimum=1.0)
 
-    # Mantiene 640 por defecto para no sacrificar precision. Se puede bajar
-    # desde .env si un equipo necesita ahorrar mas recursos.
+    # Perfil liviano usado automaticamente cuando la ventana queda oculta o
+    # cuando HEADLESS=true. Cinco inferencias por segundo son suficientes para
+    # mantener seguimiento de personas caminando sin tener YOLO al 100%.
+    BACKGROUND_PROCESS_FPS = _env_float(
+        "BACKGROUND_PROCESS_FPS",
+        5.0,
+        minimum=1.0
+    )
+
+    # Resolucion de inferencia visual y de segundo plano. El modelo no se
+    # recarga al cambiar de perfil; solamente cambia el tamano de entrada.
     YOLO_IMGSZ = _env_int("YOLO_IMGSZ", 640, minimum=320)
+    BACKGROUND_YOLO_IMGSZ = _env_int(
+        "BACKGROUND_YOLO_IMGSZ",
+        512,
+        minimum=320
+    )
+
+    # PyTorch suele usar todos los nucleos disponibles en CPU. Limitarlo evita
+    # que una notebook quede bloqueada aunque el proceso siga detectando bien.
+    YOLO_CPU_THREADS = _env_int("YOLO_CPU_THREADS", 2, minimum=1)
 
     MANAGED_CLIENT = bool(CLIENT_ID and CLIENT_TOKEN)
 
