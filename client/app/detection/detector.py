@@ -51,8 +51,8 @@ class PersonDetector:
         self.model = YOLO(str(resolved_model))
 
         self.tracker = Tracker(
-            max_missing=15,
-            max_distance=170
+            max_missing=10,
+            max_distance=150
         )
 
         # Motion gate exclusivo del perfil liviano. Cuando aparece movimiento
@@ -61,7 +61,7 @@ class PersonDetector:
         self._motion_previous = None
         self._last_inference_at = 0.0
         self._activity_until = 0.0
-        self._idle_refresh_seconds = 1.5
+        self._idle_refresh_seconds = 2.5
         self._motion_threshold = 25
         self._motion_ratio = 0.008
         self._motion_hold_seconds = 1.2
@@ -72,7 +72,7 @@ class PersonDetector:
         print(f"[YOLO] Tamano de inferencia: {self.imgsz}")
         if not self.cuda_enabled:
             print(f"[YOLO] Hilos CPU maximos: {self.cpu_threads}")
-        print("[TRACKER] ID inmediato habilitado.")
+        print("[TRACKER] ID inmediato y punto suavizado habilitados.")
         print("[YOLO] Motion gate de segundo plano habilitado.")
 
     @staticmethod
@@ -124,7 +124,7 @@ class PersonDetector:
             classes=[0],
             conf=self.confidence,
             imgsz=self.imgsz,
-            max_det=30,
+            max_det=20,
             verbose=False,
             device=self.device,
             half=self.use_half
@@ -142,9 +142,9 @@ class PersonDetector:
         if height <= 0 or width <= 0:
             return True
 
-        sample_width = 160
+        sample_width = 128
         sample_height = max(
-            90,
+            72,
             int(round(height * (sample_width / float(width))))
         )
 
