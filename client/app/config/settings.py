@@ -93,25 +93,23 @@ class Settings:
     # Vista abierta: conserva suficiente fluidez para calibrar y diagnosticar.
     PROCESS_FPS = _env_float("PROCESS_FPS", 12.0, minimum=1.0)
 
-    # Segundo plano: se procesa solo el frame mas reciente a una frecuencia
-    # baja. El motion gate del detector evita inferencia continua cuando no hay
-    # movimiento, por lo que 3 FPS no significa 3 inferencias permanentes.
-    BACKGROUND_PROCESS_FPS = _env_float(
-        "BACKGROUND_PROCESS_FPS",
+    # Perfil de produccion oculto. Los min() son intencionales: instalaciones
+    # existentes pueden conservar 5 FPS/512/2 hilos de una version anterior
+    # en .env. Esos valores ya no deben impedir que entre el perfil liviano.
+    BACKGROUND_PROCESS_FPS = min(
         3.0,
-        minimum=1.0
+        _env_float("BACKGROUND_PROCESS_FPS", 3.0, minimum=1.0)
     )
 
     YOLO_IMGSZ = _env_int("YOLO_IMGSZ", 640, minimum=320)
-    BACKGROUND_YOLO_IMGSZ = _env_int(
-        "BACKGROUND_YOLO_IMGSZ",
+    BACKGROUND_YOLO_IMGSZ = min(
         416,
-        minimum=320
+        _env_int("BACKGROUND_YOLO_IMGSZ", 416, minimum=320)
     )
 
-    # Un solo hilo evita que Torch/MKL se adueñen del equipo. El tracker y la
-    # lectura RTSP siguen en sus propios hilos ligeros.
-    YOLO_CPU_THREADS = _env_int("YOLO_CPU_THREADS", 1, minimum=1)
+    # En CPU se fuerza un solo hilo para que Torch/MKL no saturen notebooks.
+    # La lectura RTSP, sincronizacion y GUI mantienen sus propios hilos.
+    YOLO_CPU_THREADS = 1
 
     MANAGED_CLIENT = bool(CLIENT_ID and CLIENT_TOKEN)
 
