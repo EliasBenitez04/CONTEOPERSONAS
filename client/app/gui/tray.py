@@ -1,6 +1,7 @@
 import ctypes
 import sys
 import threading
+import time
 
 import pystray
 from PIL import Image, ImageDraw
@@ -12,6 +13,7 @@ class TrayController:
     SW_HIDE = 0
     SW_SHOW = 5
     SW_RESTORE = 9
+    WM_CHAR = 0x0102
 
     def __init__(self, window_title: str):
         self.window_title = str(window_title)
@@ -53,6 +55,11 @@ class TrayController:
                 default=True
             ),
             pystray.MenuItem(
+                "Configurar linea",
+                self._on_configure
+            ),
+            pystray.Menu.SEPARATOR,
+            pystray.MenuItem(
                 "Salir",
                 self._on_exit
             )
@@ -85,13 +92,48 @@ class TrayController:
 
         self._thread = None
 
+    def _delayed_restore(self):
+        # Cuando el usuario cerro la X, OpenCV puede necesitar uno o dos ciclos
+        # de imshow() para recrear el HWND. Reintentamos para recuperar foco.
+        for delay in (0.05, 0.18, 0.35):
+            time.sleep(delay)
+            if self.restore_window():
+                return
+
     def _on_show(self, icon=None, item=None):
-        # Si la ventana sigue existiendo pero esta minimizada/oculta, se
-        # restaura inmediatamente desde el thread del icono. El evento queda
-        # marcado igualmente para que el bucle principal pueda recrearla si
-        # OpenCV la destruyo al pulsar X.
-        self.restore_window()
         self._show_requested.set()
+        self.restore_window()
+        threading.Thread(
+            target=self._delayed_restore,
+            daemon=True,
+            name="ContePersonasRestore"
+        ).start()
+
+    def _on_configure(self, icon=None, item=None):
+        # Ademas de restaurar, enviamos una 'c' directamente al HWND de OpenCV.
+        # Asi la configuracion funciona aunque Windows no entregue foco de
+        # teclado al primer intento despues de sacar la app de la bandeja.
+        self._show_requested.set()
+
+        def configure_when_visible():
+            for delay in (0.12, 0.25, 0.45, 0.75):
+                time.sleep(delay)
+                self.restore_window()
+                hwnd = self._find_window()
+                if hwnd:
+                    self._user32.PostMessageW(
+                        hwnd,
+                        self.WM_CHAR,
+                        ord("c"),
+                        0
+                    )
+                    return
+
+        threading.Thread(
+            target=configure_when_visible,
+            daemon=True,
+            name="ContePersonasConfigureLine"
+        ).start()
 
     def _on_exit(self, icon=None, item=None):
         self._exit_requested.set()
@@ -141,9 +183,12 @@ class TrayController:
 
         self._user32.ShowWindow(hwnd, self.SW_RESTORE)
         self._user32.ShowWindow(hwnd, self.SW_SHOW)
+        self._user32.BringWindowToTop(hwnd)
 
         try:
             self._user32.SetForegroundWindow(hwnd)
+            self._user32.SetActiveWindow(hwnd)
+            self._user32.SetFocus(hwnd)
         except Exception:
             pass
 
