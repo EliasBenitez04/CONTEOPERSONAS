@@ -13,15 +13,16 @@ class PersonDetector:
         self,
         model_path="yolov8n.pt",
         confidence=0.22,
-        imgsz=640
+        imgsz=640,
+        cpu_threads=2
     ):
         resolved_model = Path(model_path)
         if not resolved_model.is_absolute():
             resolved_model = resource_path(str(resolved_model))
 
-        self.model = YOLO(str(resolved_model))
         self.confidence = float(confidence)
-        self.imgsz = int(imgsz)
+        self.imgsz = self._normalize_imgsz(imgsz)
+        self.cpu_threads = max(1, int(cpu_threads))
 
         self.cuda_enabled = bool(torch.cuda.is_available())
         self.device = 0 if self.cuda_enabled else "cpu"
@@ -29,6 +30,20 @@ class PersonDetector:
 
         if self.cuda_enabled:
             torch.backends.cudnn.benchmark = True
+        else:
+            # Evita que PyTorch ocupe todos los nucleos del equipo. En una
+            # notebook esto reduce mucho el pico de CPU y deja Windows usable.
+            try:
+                torch.set_num_threads(self.cpu_threads)
+            except RuntimeError:
+                pass
+
+            try:
+                torch.set_num_interop_threads(1)
+            except RuntimeError:
+                pass
+
+        self.model = YOLO(str(resolved_model))
 
         self.tracker = Tracker(
             max_missing=15,
@@ -38,7 +53,15 @@ class PersonDetector:
         print(f"[YOLO] Modelo cargado: {resolved_model}")
         self._print_device()
         print(f"[YOLO] Tamano de inferencia: {self.imgsz}")
+        if not self.cuda_enabled:
+            print(f"[YOLO] Hilos CPU maximos: {self.cpu_threads}")
         print("[TRACKER] ID inmediato habilitado.")
+
+    @staticmethod
+    def _normalize_imgsz(imgsz):
+        value = max(320, int(imgsz))
+        # YOLO trabaja mejor con dimensiones divisibles por 32.
+        return max(320, (value // 32) * 32)
 
     def _print_device(self):
         if self.cuda_enabled:
@@ -61,11 +84,22 @@ class PersonDetector:
         self.use_half = False
 
         try:
+            torch.set_num_threads(self.cpu_threads)
+        except RuntimeError:
+            pass
+
+        try:
+            torch.set_num_interop_threads(1)
+        except RuntimeError:
+            pass
+
+        try:
             torch.cuda.empty_cache()
         except Exception:
             pass
 
         self._print_device()
+        print(f"[YOLO] Hilos CPU maximos: {self.cpu_threads}")
 
     def _predict(self, frame):
         return self.model.predict(
@@ -86,6 +120,14 @@ class PersonDetector:
             "[YOLO] Confianza actualizada: "
             f"{self.confidence:.2f}"
         )
+
+    def set_imgsz(self, imgsz):
+        value = self._normalize_imgsz(imgsz)
+        if value == self.imgsz:
+            return
+
+        self.imgsz = value
+        print(f"[YOLO] Tamano de inferencia: {self.imgsz}")
 
     def track(self, frame):
         try:
