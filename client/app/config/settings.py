@@ -87,36 +87,31 @@ class Settings:
         minimum=1
     )
 
-    # Modo visual por defecto: muestra la camara y permite minimizarla
-    # al area de iconos ocultos. HEADLESS=true sigue disponible si alguna
-    # sucursal necesita funcionar sin interfaz grafica.
     HEADLESS = _env_bool("HEADLESS", False)
     TRAY_MODE = _env_bool("TRAY_MODE", True)
 
-    # Perfil visual. Conserva la frecuencia actual para calibracion y pruebas.
+    # Vista abierta: conserva suficiente fluidez para calibrar y diagnosticar.
     PROCESS_FPS = _env_float("PROCESS_FPS", 12.0, minimum=1.0)
 
-    # Perfil liviano usado automaticamente cuando la ventana queda oculta o
-    # cuando HEADLESS=true. Cinco inferencias por segundo son suficientes para
-    # mantener seguimiento de personas caminando sin tener YOLO al 100%.
+    # Segundo plano: se procesa solo el frame mas reciente a una frecuencia
+    # baja. El motion gate del detector evita inferencia continua cuando no hay
+    # movimiento, por lo que 3 FPS no significa 3 inferencias permanentes.
     BACKGROUND_PROCESS_FPS = _env_float(
         "BACKGROUND_PROCESS_FPS",
-        5.0,
+        3.0,
         minimum=1.0
     )
 
-    # Resolucion de inferencia visual y de segundo plano. El modelo no se
-    # recarga al cambiar de perfil; solamente cambia el tamano de entrada.
     YOLO_IMGSZ = _env_int("YOLO_IMGSZ", 640, minimum=320)
     BACKGROUND_YOLO_IMGSZ = _env_int(
         "BACKGROUND_YOLO_IMGSZ",
-        512,
+        416,
         minimum=320
     )
 
-    # PyTorch suele usar todos los nucleos disponibles en CPU. Limitarlo evita
-    # que una notebook quede bloqueada aunque el proceso siga detectando bien.
-    YOLO_CPU_THREADS = _env_int("YOLO_CPU_THREADS", 2, minimum=1)
+    # Un solo hilo evita que Torch/MKL se adueñen del equipo. El tracker y la
+    # lectura RTSP siguen en sus propios hilos ligeros.
+    YOLO_CPU_THREADS = _env_int("YOLO_CPU_THREADS", 1, minimum=1)
 
     MANAGED_CLIENT = bool(CLIENT_ID and CLIENT_TOKEN)
 
