@@ -78,6 +78,16 @@ class PersonDetector:
     @staticmethod
     def _normalize_imgsz(imgsz):
         value = max(320, int(imgsz))
+
+        # Compatibilidad con .env anteriores: 640 pasa a 512 en vista y
+        # 416 pasa a 320 en segundo plano. Las personas de puerta ocupan una
+        # porcion grande del cuadro, por lo que no necesitamos inferencia 640
+        # para mantener un conteo fiable.
+        if value <= 416:
+            value = 320
+        else:
+            value = min(value, 512)
+
         return max(320, (value // 32) * 32)
 
     def _print_device(self):
