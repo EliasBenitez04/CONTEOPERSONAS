@@ -6,7 +6,7 @@ from app.config.camera_config import (
     load_camera_config,
     save_camera_config
 )
-from app.gui.line_config import LineConfigurator
+from app.gui.line_config import LineConfigurator, fit_main_window
 from app.gui.tray import TrayController
 from app.detection.detector import PersonDetector
 from app.detection.counter import LineCounter
@@ -52,12 +52,12 @@ def draw_direction_labels(frame, counter, line_p1, line_p2):
         out_pos = positive
 
     cv2.putText(
-        frame, "OUT", in_pos,
-        cv2.FONT_HERSHEY_SIMPLEX, 0.90, (0, 70, 255), 3
+        frame, "IN", in_pos,
+        cv2.FONT_HERSHEY_SIMPLEX, 0.90, (0, 255, 0), 3
     )
     cv2.putText(
-        frame, "IN", out_pos,
-        cv2.FONT_HERSHEY_SIMPLEX, 0.90, (0, 255, 0), 3
+        frame, "OUT", out_pos,
+        cv2.FONT_HERSHEY_SIMPLEX, 0.90, (0, 70, 255), 3
     )
 
 
@@ -147,13 +147,17 @@ def print_client_diagnostics():
         f"{'SI' if settings.TRAY_MODE and not settings.HEADLESS else 'NO'}"
     )
     print(
-        "[CLIENT] Perfil visible: "
+        "[CLIENT] Perfil visible solicitado: "
         f"{settings.PROCESS_FPS:g} FPS / {settings.YOLO_IMGSZ}px"
     )
     print(
-        "[CLIENT] Perfil segundo plano: "
+        "[CLIENT] Perfil segundo plano solicitado: "
         f"{settings.BACKGROUND_PROCESS_FPS:g} FPS / "
         f"{settings.BACKGROUND_YOLO_IMGSZ}px"
+    )
+    print(
+        "[CLIENT] El detector limita automaticamente la inferencia a "
+        "512 px visible / 320 px segundo plano."
     )
     print(
         "[CLIENT] Hilos CPU YOLO: "
@@ -166,11 +170,11 @@ def print_client_diagnostics():
             client_preview = f"{client_preview[:8]}...{client_preview[-4:]}"
         print("[CLIENT] Modo V3 administrado: SI")
         print(f"[CLIENT] CLIENT_ID: {client_preview}")
-        print("[CLIENT] CLIENT_TOKEN: configurado")
+        print("[CLIENT] Credencial de cliente configurada")
     else:
         print("[CLIENT] Modo V3 administrado: NO")
         print(
-            "[CLIENT] CLIENT_ID/CLIENT_TOKEN faltantes. "
+            "[CLIENT] Credenciales del cliente faltantes. "
             "El cliente no podra aparecer ONLINE en Clientes instalados."
         )
 
@@ -220,8 +224,8 @@ def main():
             )
             if initial_remote["status_code"] in (401, 403):
                 print(
-                    "[CONFIG] Revise CLIENT_ID y CLIENT_TOKEN: deben ser "
-                    "los generados para ESTA camara en Administracion > Clientes."
+                    "[CONFIG] Revise las credenciales generadas para ESTA "
+                    "camara en Administracion > Clientes."
                 )
             elif initial_remote["status_code"] == 404:
                 print(
@@ -249,7 +253,7 @@ def main():
         rtsp_url=settings.CAMERA_RTSP_URL,
         reconnect_seconds=settings.RECONNECT_SECONDS,
         max_fps=initial_fps,
-        copy_frame=not settings.HEADLESS
+        copy_frame=False
     )
 
     detector = PersonDetector(
@@ -314,9 +318,19 @@ def main():
                 and not window_hidden
             )
 
+            # En segundo plano trabajamos directamente sobre el ultimo ndarray
+            # publicado por la camara. Solo copiamos cuando realmente vamos a
+            # dibujar la interfaz, evitando una copia 1080p permanente.
+            if render_view:
+                frame = frame.copy()
+
             desired_mode = "visible" if render_view else "background"
             if desired_mode != performance_mode:
                 if render_view:
+                    fit_main_window(
+                        WINDOW_TITLE,
+                        frame
+                    )
                     camera.set_max_fps(settings.PROCESS_FPS)
                     detector.set_imgsz(settings.YOLO_IMGSZ)
                     print("[RENDIMIENTO] Perfil visual activo.")
