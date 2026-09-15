@@ -1,5 +1,7 @@
 from pathlib import Path
+import time
 
+import cv2
 import torch
 from ultralytics import YOLO
 
@@ -14,7 +16,7 @@ class PersonDetector:
         model_path="yolov8n.pt",
         confidence=0.22,
         imgsz=640,
-        cpu_threads=2
+        cpu_threads=1
     ):
         resolved_model = Path(model_path)
         if not resolved_model.is_absolute():
@@ -28,11 +30,16 @@ class PersonDetector:
         self.device = 0 if self.cuda_enabled else "cpu"
         self.use_half = self.cuda_enabled
 
+        # OpenCV tambien puede crear un pool de hilos para resize/cvtColor.
+        # Un hilo es suficiente para estas operaciones pequeñas y evita picos.
+        try:
+            cv2.setNumThreads(1)
+        except Exception:
+            pass
+
         if self.cuda_enabled:
             torch.backends.cudnn.benchmark = True
         else:
-            # Evita que PyTorch ocupe todos los nucleos del equipo. En una
-            # notebook esto reduce mucho el pico de CPU y deja Windows usable.
             try:
                 torch.set_num_threads(self.cpu_threads)
             except RuntimeError:
@@ -50,17 +57,27 @@ class PersonDetector:
             max_distance=170
         )
 
+        # Motion gate: solo se activa automaticamente en el perfil liviano
+        # (imgsz <= 416 y CPU). No modifica el tracker ni el contador; evita
+        # llamar a YOLO cuando la escena esta quieta. Cada cierto tiempo hace
+        # una inferencia de refresco aunque no detecte movimiento.
+        self._motion_previous = None
+        self._last_inference_at = 0.0
+        self._idle_refresh_seconds = 1.5
+        self._motion_threshold = 25
+        self._motion_ratio = 0.008
+
         print(f"[YOLO] Modelo cargado: {resolved_model}")
         self._print_device()
         print(f"[YOLO] Tamano de inferencia: {self.imgsz}")
         if not self.cuda_enabled:
             print(f"[YOLO] Hilos CPU maximos: {self.cpu_threads}")
         print("[TRACKER] ID inmediato habilitado.")
+        print("[YOLO] Motion gate de segundo plano habilitado.")
 
     @staticmethod
     def _normalize_imgsz(imgsz):
         value = max(320, int(imgsz))
-        # YOLO trabaja mejor con dimensiones divisibles por 32.
         return max(320, (value // 32) * 32)
 
     def _print_device(self):
@@ -113,6 +130,58 @@ class PersonDetector:
             half=self.use_half
         )
 
+    def _background_motion_detected(self, frame):
+        # En CUDA el ahorro de CPU no compensa saltar inferencias. En modo
+        # visual (640 por defecto) tampoco se aplica para mantener la vista
+        # totalmente fluida durante configuracion y diagnostico.
+        if self.cuda_enabled or self.imgsz > 416:
+            return True
+
+        height, width = frame.shape[:2]
+        if height <= 0 or width <= 0:
+            return True
+
+        sample_width = 160
+        sample_height = max(
+            90,
+            int(round(height * (sample_width / float(width))))
+        )
+
+        small = cv2.resize(
+            frame,
+            (sample_width, sample_height),
+            interpolation=cv2.INTER_AREA
+        )
+        gray = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY)
+        gray = cv2.GaussianBlur(gray, (5, 5), 0)
+
+        previous = self._motion_previous
+        self._motion_previous = gray
+
+        if previous is None or previous.shape != gray.shape:
+            return True
+
+        difference = cv2.absdiff(previous, gray)
+        _, changed = cv2.threshold(
+            difference,
+            self._motion_threshold,
+            255,
+            cv2.THRESH_BINARY
+        )
+
+        changed_ratio = (
+            cv2.countNonZero(changed)
+            / float(changed.shape[0] * changed.shape[1])
+        )
+
+        if changed_ratio >= self._motion_ratio:
+            return True
+
+        return (
+            time.monotonic() - self._last_inference_at
+            >= self._idle_refresh_seconds
+        )
+
     def set_confidence(self, confidence):
         value = float(confidence)
         self.confidence = min(0.99, max(0.01, value))
@@ -127,9 +196,13 @@ class PersonDetector:
             return
 
         self.imgsz = value
+        self._motion_previous = None
         print(f"[YOLO] Tamano de inferencia: {self.imgsz}")
 
     def track(self, frame):
+        if not self._background_motion_detected(frame):
+            return self.tracker.update([])
+
         try:
             results = self._predict(frame)
         except Exception as error:
@@ -138,6 +211,8 @@ class PersonDetector:
 
             self._disable_cuda(error)
             results = self._predict(frame)
+
+        self._last_inference_at = time.monotonic()
 
         detections = []
         if not results:
@@ -175,3 +250,4 @@ class PersonDetector:
 
     def reset_tracker(self):
         self.tracker.reset()
+        self._motion_previous = None
