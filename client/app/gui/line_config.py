@@ -25,6 +25,7 @@ class LineConfigurator:
 
     @staticmethod
     def _preview_size(frame):
+        """Devuelve un tamano de vista sin recortar ni ampliar la imagen."""
         height, width = frame.shape[:2]
 
         if width <= 0 or height <= 0:
@@ -33,6 +34,8 @@ class LineConfigurator:
                 PREVIEW_MAX_HEIGHT
             )
 
+        # Nunca hacemos upscale/zoom. Si el stream es mayor a 1280x720,
+        # solamente reducimos la vista conservando exactamente su proporcion.
         scale = min(
             PREVIEW_MAX_WIDTH / float(width),
             PREVIEW_MAX_HEIGHT / float(height),
@@ -68,26 +71,40 @@ class LineConfigurator:
             height
         )
 
-    def _restore_main_preview(self):
+    def _restore_main_window_size(self):
+        """Restaura solo el tamano del HWND principal, sin destruirlo.
+
+        Es importante no cerrar/recrear la ventana principal: el controlador
+        de bandeja de Windows sigue trabajando con ese HWND. Destruirlo podia
+        hacer que una compilacion pareciera no abrir o que perdiera el foco.
+        """
         if self.original_frame is None:
             return
 
-        # La vista principal se creaba implicitamente con WINDOW_AUTOSIZE,
-        # mientras que el editor usa WINDOW_NORMAL. Al cerrar el editor,
-        # OpenCV volvia a mostrar el frame a tamano nativo y parecia un zoom.
-        # La recreamos en modo redimensionable con el mismo limite del editor.
-        try:
-            cv2.destroyWindow(
-                MAIN_WINDOW_NAME
-            )
-            cv2.waitKey(1)
-        except cv2.error:
-            pass
-
-        self._prepare_window(
-            MAIN_WINDOW_NAME,
+        width, height = self._preview_size(
             self.original_frame
         )
+
+        try:
+            # imshow crea inicialmente la ventana principal en AUTOSIZE.
+            # La pasamos a modo redimensionable conservando el mismo HWND y
+            # luego fijamos una vista completa, proporcional y sin zoom.
+            if hasattr(cv2, "WND_PROP_AUTOSIZE"):
+                cv2.setWindowProperty(
+                    MAIN_WINDOW_NAME,
+                    cv2.WND_PROP_AUTOSIZE,
+                    0.0
+                )
+
+            cv2.resizeWindow(
+                MAIN_WINDOW_NAME,
+                width,
+                height
+            )
+        except cv2.error:
+            # Si la principal fue minimizada/cerrada mientras se configuraba,
+            # el bucle normal/tray se encargara de restaurarla.
+            pass
 
     def mouse_event(
         self,
@@ -385,7 +402,7 @@ class LineConfigurator:
             window_name
         )
 
-        self._restore_main_preview()
+        self._restore_main_window_size()
 
         return (
             self.config
