@@ -147,8 +147,17 @@ def print_client_diagnostics():
         f"{'SI' if settings.TRAY_MODE and not settings.HEADLESS else 'NO'}"
     )
     print(
-        "[CLIENT] Inferencia maxima: "
-        f"{settings.PROCESS_FPS:g} FPS"
+        "[CLIENT] Perfil visible: "
+        f"{settings.PROCESS_FPS:g} FPS / {settings.YOLO_IMGSZ}px"
+    )
+    print(
+        "[CLIENT] Perfil segundo plano: "
+        f"{settings.BACKGROUND_PROCESS_FPS:g} FPS / "
+        f"{settings.BACKGROUND_YOLO_IMGSZ}px"
+    )
+    print(
+        "[CLIENT] Hilos CPU YOLO: "
+        f"{settings.YOLO_CPU_THREADS}"
     )
 
     if settings.MANAGED_CLIENT:
@@ -225,17 +234,29 @@ def main():
                     "mantener el conteo offline."
                 )
 
+    initial_fps = (
+        settings.BACKGROUND_PROCESS_FPS
+        if settings.HEADLESS
+        else settings.PROCESS_FPS
+    )
+    initial_imgsz = (
+        min(settings.YOLO_IMGSZ, settings.BACKGROUND_YOLO_IMGSZ)
+        if settings.HEADLESS
+        else settings.YOLO_IMGSZ
+    )
+
     camera = RTSPCamera(
         rtsp_url=settings.CAMERA_RTSP_URL,
         reconnect_seconds=settings.RECONNECT_SECONDS,
-        max_fps=settings.PROCESS_FPS,
+        max_fps=initial_fps,
         copy_frame=not settings.HEADLESS
     )
 
     detector = PersonDetector(
         model_path="yolov8n.pt",
         confidence=float(config.get("confidence", 0.22)),
-        imgsz=settings.YOLO_IMGSZ
+        imgsz=initial_imgsz,
+        cpu_threads=settings.YOLO_CPU_THREADS
     )
 
     line_p1, line_p2 = get_line(config)
@@ -270,6 +291,7 @@ def main():
     tray = None
     window_hidden = False
     restore_pending = False
+    performance_mode = None
 
     if not settings.HEADLESS and settings.TRAY_MODE:
         tray = TrayController(WINDOW_TITLE)
@@ -287,7 +309,40 @@ def main():
                     restore_pending = True
                     print("[TRAY] Restaurando ventana.")
 
+            render_view = (
+                not settings.HEADLESS
+                and not window_hidden
+            )
+
+            desired_mode = "visible" if render_view else "background"
+            if desired_mode != performance_mode:
+                if render_view:
+                    camera.set_max_fps(settings.PROCESS_FPS)
+                    detector.set_imgsz(settings.YOLO_IMGSZ)
+                    print("[RENDIMIENTO] Perfil visual activo.")
+                else:
+                    camera.set_max_fps(settings.BACKGROUND_PROCESS_FPS)
+                    detector.set_imgsz(
+                        min(
+                            settings.YOLO_IMGSZ,
+                            settings.BACKGROUND_YOLO_IMGSZ
+                        )
+                    )
+                    print(
+                        "[RENDIMIENTO] Perfil liviano de segundo plano activo."
+                    )
+                performance_mode = desired_mode
+
             remote_update = synchronizer.pop_remote_config()
+            if remote_update:
+                remote_version = int(remote_update.get("config_version", 0))
+                current_version = int(config.get("config_version", 0))
+                if (
+                    not remote_update.get("bootstrap_required")
+                    and remote_version <= current_version
+                ):
+                    remote_update = None
+
             if remote_update:
                 new_config = normalize_remote_config(remote_update)
                 runtime_branch_id = int(remote_update["branch_id"])
@@ -319,11 +374,6 @@ def main():
                     "[CONFIG] Cambio remoto aplicado sin alterar "
                     "el historial ya registrado."
                 )
-
-            render_view = (
-                not settings.HEADLESS
-                and not window_hidden
-            )
 
             persons = detector.track(frame)
 
@@ -407,16 +457,10 @@ def main():
 
             if settings.TRAY_MODE:
                 footer = (
-                    "Minimizar/X: iconos ocultos | Q: salir"
-                    if settings.MANAGED_CLIENT
-                    else "C: configurar linea | Minimizar/X: iconos ocultos | Q: salir"
+                    "C: configurar linea | Minimizar/X: iconos ocultos | Q: salir"
                 )
             else:
-                footer = (
-                    "Configuracion remota | Q: salir"
-                    if settings.MANAGED_CLIENT
-                    else "C: configurar linea | Q: salir"
-                )
+                footer = "C: configurar linea | Q: salir"
 
             cv2.putText(
                 frame,
@@ -451,13 +495,6 @@ def main():
                 break
 
             if key == ord("c"):
-                if settings.MANAGED_CLIENT:
-                    print(
-                        "[CONFIG] Cliente administrado: cambie la linea "
-                        "desde el servidor central."
-                    )
-                    continue
-
                 old_in_side = counter.in_side
                 configurator = LineConfigurator()
                 new_config = configurator.run(frame)
@@ -465,6 +502,30 @@ def main():
                     continue
 
                 config = new_config
+
+                if settings.MANAGED_CLIENT:
+                    publish = api_client.update_remote_config(config)
+                    if publish["success"]:
+                        remote_saved = publish["data"]
+                        config = normalize_remote_config(remote_saved)
+                        runtime_branch_id = int(remote_saved["branch_id"])
+                        runtime_camera_name = str(remote_saved["camera_name"])
+                        save_camera_config(config)
+                        # Descarta una configuracion vieja que pudiera haber
+                        # quedado en cola justo antes del guardado local.
+                        synchronizer.pop_remote_config()
+                        print(
+                            "[CONFIG] Linea guardada localmente y enviada "
+                            "al servidor central. "
+                            f"Version={config.get('config_version', 0)}"
+                        )
+                    else:
+                        print(
+                            "[CONFIG] Linea guardada localmente, pero no se "
+                            "pudo actualizar el servidor. "
+                            f"HTTP={publish['status_code']} | {publish['error']}"
+                        )
+
                 line_p1, line_p2 = get_line(config)
                 new_in_side = 1 if int(config["in_side"]) >= 0 else -1
                 direction_changed = new_in_side != old_in_side
@@ -482,6 +543,8 @@ def main():
                     new_in_side,
                     swap_counts=direction_changed
                 )
+                counter.set_margin(config["margin"])
+                detector.set_confidence(config["confidence"])
                 detector.reset_tracker()
 
                 updated_totals = database.get_today_totals(
@@ -518,7 +581,3 @@ def main():
 
         if not settings.HEADLESS:
             cv2.destroyAllWindows()
-
-
-if __name__ == "__main__":
-    main()
