@@ -6,6 +6,11 @@ from app.config.camera_config import (
 )
 
 
+MAIN_WINDOW_NAME = "ContePersonas - Sistema Camara"
+PREVIEW_MAX_WIDTH = 1280
+PREVIEW_MAX_HEIGHT = 720
+
+
 class LineConfigurator:
 
     def __init__(self):
@@ -17,6 +22,72 @@ class LineConfigurator:
 
         self.original_frame = None
         self.frame = None
+
+    @staticmethod
+    def _preview_size(frame):
+        height, width = frame.shape[:2]
+
+        if width <= 0 or height <= 0:
+            return (
+                PREVIEW_MAX_WIDTH,
+                PREVIEW_MAX_HEIGHT
+            )
+
+        scale = min(
+            PREVIEW_MAX_WIDTH / float(width),
+            PREVIEW_MAX_HEIGHT / float(height),
+            1.0
+        )
+
+        return (
+            max(1, int(round(width * scale))),
+            max(1, int(round(height * scale)))
+        )
+
+    @staticmethod
+    def _window_flags():
+        flags = cv2.WINDOW_NORMAL
+
+        if hasattr(cv2, "WINDOW_KEEPRATIO"):
+            flags |= cv2.WINDOW_KEEPRATIO
+
+        return flags
+
+    @classmethod
+    def _prepare_window(cls, window_name, frame):
+        width, height = cls._preview_size(frame)
+
+        cv2.namedWindow(
+            window_name,
+            cls._window_flags()
+        )
+
+        cv2.resizeWindow(
+            window_name,
+            width,
+            height
+        )
+
+    def _restore_main_preview(self):
+        if self.original_frame is None:
+            return
+
+        # La vista principal se creaba implicitamente con WINDOW_AUTOSIZE,
+        # mientras que el editor usa WINDOW_NORMAL. Al cerrar el editor,
+        # OpenCV volvia a mostrar el frame a tamano nativo y parecia un zoom.
+        # La recreamos en modo redimensionable con el mismo limite del editor.
+        try:
+            cv2.destroyWindow(
+                MAIN_WINDOW_NAME
+            )
+            cv2.waitKey(1)
+        except cv2.error:
+            pass
+
+        self._prepare_window(
+            MAIN_WINDOW_NAME,
+            self.original_frame
+        )
 
     def mouse_event(
         self,
@@ -232,9 +303,9 @@ class LineConfigurator:
             "CONFIGURAR LINEA"
         )
 
-        cv2.namedWindow(
+        self._prepare_window(
             window_name,
-            cv2.WINDOW_NORMAL
+            self.original_frame
         )
 
         cv2.setMouseCallback(
@@ -313,6 +384,8 @@ class LineConfigurator:
         cv2.destroyWindow(
             window_name
         )
+
+        self._restore_main_preview()
 
         return (
             self.config
