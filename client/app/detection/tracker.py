@@ -5,16 +5,16 @@ class Tracker:
     """
     Tracker liviano para el contador de puerta.
 
-    A diferencia de ByteTrack, asigna un ID desde la PRIMERA deteccion
-    de YOLO. Esto es importante cuando una persona aparece muy cerca de
-    la linea y no hay tiempo suficiente para que un tracker externo
-    confirme un ID antes del cruce.
+    Asigna un ID desde la primera deteccion y prioriza conservarlo mientras
+    la misma persona atraviesa la linea. Los tracks viejos reciben una
+    penalizacion para reducir la posibilidad de reutilizar un ID con una
+    persona nueva que aparece cerca del mismo lugar.
     """
 
     def __init__(
         self,
-        max_missing=15,
-        max_distance=170
+        max_missing=10,
+        max_distance=150
     ):
         self.max_missing = int(max_missing)
         self.max_distance = float(max_distance)
@@ -55,6 +55,13 @@ class Tracker:
 
         return intersection / union
 
+    @staticmethod
+    def _detection_point(detection, fallback):
+        point = detection.get("point")
+        if not point:
+            return fallback
+        return float(point[0]), float(point[1])
+
     def _new_track(self, detection):
         track_id = self.next_id
         self.next_id += 1
@@ -67,10 +74,15 @@ class Tracker:
         )
 
         cx, cy = self._center(box)
+        point_x, point_y = self._detection_point(
+            detection,
+            (cx, cy)
+        )
 
         self.tracks[track_id] = {
             "box": box,
             "center": (cx, cy),
+            "point": (point_x, point_y),
             "vx": 0.0,
             "vy": 0.0,
             "missing": 0
@@ -99,8 +111,13 @@ class Tracker:
         for track_id, track in self.tracks.items():
             tcx, tcy = track["center"]
 
-            predicted_x = tcx + track["vx"]
-            predicted_y = tcy + track["vy"]
+            prediction_steps = min(
+                3.0,
+                max(1.0, float(track["missing"]))
+            )
+
+            predicted_x = tcx + track["vx"] * prediction_steps
+            predicted_y = tcy + track["vy"] * prediction_steps
 
             for detection_index, detection in enumerate(detections):
                 box = (
@@ -132,7 +149,7 @@ class Tracker:
 
                 dynamic_distance = max(
                     self.max_distance,
-                    0.55 * max(
+                    0.42 * max(
                         math.hypot(width, height),
                         math.hypot(
                             track_width,
@@ -142,8 +159,8 @@ class Tracker:
                 )
 
                 dynamic_distance += min(
-                    100.0,
-                    track["missing"] * 12.0
+                    45.0,
+                    max(0, track["missing"] - 1) * 7.0
                 )
 
                 iou = self._iou(
@@ -153,9 +170,18 @@ class Tracker:
 
                 if (
                     distance <= dynamic_distance
-                    or iou >= 0.05
+                    or iou >= 0.06
                 ):
-                    cost = distance - (iou * 120.0)
+                    stale_penalty = max(
+                        0,
+                        track["missing"] - 1
+                    ) * 8.0
+
+                    cost = (
+                        distance
+                        - (iou * 125.0)
+                        + stale_penalty
+                    )
 
                     candidates.append(
                         (
@@ -202,8 +228,15 @@ class Tracker:
                     detection
                 )
 
+            track = self.tracks[track_id]
+            point_x, point_y = track["point"]
+
             item = dict(detection)
             item["id"] = track_id
+            item["point"] = (
+                int(round(point_x)),
+                int(round(point_y))
+            )
             output.append(item)
 
         self._remove_expired()
@@ -238,6 +271,22 @@ class Tracker:
         track["vy"] = (
             track["vy"] * 0.45
             + measured_vy * 0.55
+        )
+
+        measured_point_x, measured_point_y = self._detection_point(
+            detection,
+            (new_cx, new_cy)
+        )
+        old_point_x, old_point_y = track["point"]
+
+        # Suaviza solo el punto usado para cruzar la linea. El bounding box
+        # permanece crudo para conservar una asociacion reactiva entre IDs.
+        point_alpha = 0.68
+        track["point"] = (
+            old_point_x * (1.0 - point_alpha)
+            + measured_point_x * point_alpha,
+            old_point_y * (1.0 - point_alpha)
+            + measured_point_y * point_alpha
         )
 
         track["box"] = box
