@@ -1,3 +1,5 @@
+import ctypes
+
 import cv2
 
 from app.config.camera_config import (
@@ -7,8 +9,94 @@ from app.config.camera_config import (
 
 
 MAIN_WINDOW_NAME = "ContePersonas - Sistema Camara"
-PREVIEW_MAX_WIDTH = 1280
-PREVIEW_MAX_HEIGHT = 720
+SCREEN_MARGIN_X = 80
+SCREEN_MARGIN_Y = 120
+
+
+class _Rect(ctypes.Structure):
+    _fields_ = [
+        ("left", ctypes.c_long),
+        ("top", ctypes.c_long),
+        ("right", ctypes.c_long),
+        ("bottom", ctypes.c_long)
+    ]
+
+
+def _screen_work_area():
+    """Devuelve el area util de Windows excluyendo la barra de tareas."""
+    try:
+        rect = _Rect()
+        user32 = ctypes.windll.user32
+
+        if user32.SystemParametersInfoW(
+            48,
+            0,
+            ctypes.byref(rect),
+            0
+        ):
+            width = int(rect.right - rect.left)
+            height = int(rect.bottom - rect.top)
+
+            if width > 0 and height > 0:
+                return width, height
+    except Exception:
+        pass
+
+    return None
+
+
+def fitted_frame_size(frame):
+    """Ajusta proporcionalmente al monitor sin usar un 1280x720 fijo."""
+    height, width = frame.shape[:2]
+
+    if width <= 0 or height <= 0:
+        return 640, 480
+
+    work_area = _screen_work_area()
+    if work_area is None:
+        return width, height
+
+    screen_width, screen_height = work_area
+    available_width = max(320, screen_width - SCREEN_MARGIN_X)
+    available_height = max(240, screen_height - SCREEN_MARGIN_Y)
+
+    scale = min(
+        available_width / float(width),
+        available_height / float(height),
+        1.0
+    )
+
+    return (
+        max(1, int(round(width * scale))),
+        max(1, int(round(height * scale)))
+    )
+
+
+def _window_flags():
+    flags = cv2.WINDOW_NORMAL
+
+    if hasattr(cv2, "WINDOW_KEEPRATIO"):
+        flags |= cv2.WINDOW_KEEPRATIO
+
+    return flags
+
+
+def fit_main_window(window_name, frame):
+    """Prepara la vista principal para el monitor actual conservando ratio."""
+    width, height = fitted_frame_size(frame)
+
+    cv2.namedWindow(
+        window_name,
+        _window_flags()
+    )
+
+    cv2.resizeWindow(
+        window_name,
+        width,
+        height
+    )
+
+    return width, height
 
 
 class LineConfigurator:
@@ -18,77 +106,67 @@ class LineConfigurator:
             load_camera_config()
         )
 
+        # Los puntos siempre se guardan en coordenadas REALES del stream.
+        # La vista puede ser mas pequena dependiendo del monitor.
         self.points = []
 
         self.original_frame = None
         self.frame = None
+        self.preview_width = 0
+        self.preview_height = 0
 
-    @staticmethod
-    def _preview_size(frame):
-        """Devuelve un tamano de vista sin recortar ni ampliar la imagen."""
-        height, width = frame.shape[:2]
-
-        if width <= 0 or height <= 0:
-            return (
-                PREVIEW_MAX_WIDTH,
-                PREVIEW_MAX_HEIGHT
-            )
-
-        # Nunca hacemos upscale/zoom. Si el stream es mayor a 1280x720,
-        # solamente reducimos la vista conservando exactamente su proporcion.
-        scale = min(
-            PREVIEW_MAX_WIDTH / float(width),
-            PREVIEW_MAX_HEIGHT / float(height),
-            1.0
+    def _set_preview_geometry(self):
+        self.preview_width, self.preview_height = (
+            fitted_frame_size(self.original_frame)
         )
+
+    def _clamp_original_point(self, point):
+        height, width = self.original_frame.shape[:2]
+        x, y = point
 
         return (
-            max(1, int(round(width * scale))),
-            max(1, int(round(height * scale)))
+            max(0, min(width - 1, int(round(x)))),
+            max(0, min(height - 1, int(round(y))))
         )
 
-    @staticmethod
-    def _window_flags():
-        flags = cv2.WINDOW_NORMAL
+    def _preview_to_original(self, x, y):
+        height, width = self.original_frame.shape[:2]
 
-        if hasattr(cv2, "WINDOW_KEEPRATIO"):
-            flags |= cv2.WINDOW_KEEPRATIO
+        if self.preview_width <= 0 or self.preview_height <= 0:
+            return self._clamp_original_point((x, y))
 
-        return flags
+        original_x = x * (width / float(self.preview_width))
+        original_y = y * (height / float(self.preview_height))
 
-    @classmethod
-    def _prepare_window(cls, window_name, frame):
-        width, height = cls._preview_size(frame)
-
-        cv2.namedWindow(
-            window_name,
-            cls._window_flags()
+        return self._clamp_original_point(
+            (original_x, original_y)
         )
 
-        cv2.resizeWindow(
-            window_name,
-            width,
-            height
+    def _resize_for_preview(self, frame):
+        height, width = frame.shape[:2]
+
+        if (
+            width == self.preview_width
+            and height == self.preview_height
+        ):
+            return frame
+
+        return cv2.resize(
+            frame,
+            (self.preview_width, self.preview_height),
+            interpolation=cv2.INTER_AREA
         )
 
     def _restore_main_window_size(self):
-        """Restaura solo el tamano del HWND principal, sin destruirlo.
-
-        Es importante no cerrar/recrear la ventana principal: el controlador
-        de bandeja de Windows sigue trabajando con ese HWND. Destruirlo podia
-        hacer que una compilacion pareciera no abrir o que perdiera el foco.
-        """
+        """Restaura el HWND principal sin destruirlo ni fijarlo a 1280x720."""
         if self.original_frame is None:
             return
 
-        width, height = self._preview_size(
+        width, height = fitted_frame_size(
             self.original_frame
         )
 
         try:
-            # imshow crea inicialmente la ventana principal en AUTOSIZE.
-            # La pasamos a modo redimensionable conservando el mismo HWND y
-            # luego fijamos una vista completa, proporcional y sin zoom.
             if hasattr(cv2, "WND_PROP_AUTOSIZE"):
                 cv2.setWindowProperty(
                     MAIN_WINDOW_NAME,
@@ -102,8 +180,6 @@ class LineConfigurator:
                 height
             )
         except cv2.error:
-            # Si la principal fue minimizada/cerrada mientras se configuraba,
-            # el bucle normal/tray se encargara de restaurarla.
             pass
 
     def mouse_event(
@@ -114,17 +190,14 @@ class LineConfigurator:
         flags,
         param
     ):
-        if (
-            event
-            != cv2.EVENT_LBUTTONDOWN
-        ):
+        if event != cv2.EVENT_LBUTTONDOWN:
             return
 
         if len(self.points) == 2:
             self.points = []
 
         self.points.append(
-            (x, y)
+            self._preview_to_original(x, y)
         )
 
         self.draw()
@@ -169,7 +242,7 @@ class LineConfigurator:
 
         return positive, negative
 
-    def _draw_direction_labels(self):
+    def _draw_direction_labels(self, canvas):
         if len(self.points) != 2:
             return
 
@@ -188,7 +261,7 @@ class LineConfigurator:
             out_pos = positive
 
         cv2.putText(
-            self.frame,
+            canvas,
             "IN",
             in_pos,
             cv2.FONT_HERSHEY_SIMPLEX,
@@ -198,7 +271,7 @@ class LineConfigurator:
         )
 
         cv2.putText(
-            self.frame,
+            canvas,
             "OUT",
             out_pos,
             cv2.FONT_HERSHEY_SIMPLEX,
@@ -208,11 +281,11 @@ class LineConfigurator:
         )
 
     def draw(self):
-        self.frame = (
+        canvas = (
             self.original_frame.copy()
         )
 
-        overlay = self.frame.copy()
+        overlay = canvas.copy()
 
         cv2.rectangle(
             overlay,
@@ -225,15 +298,15 @@ class LineConfigurator:
         cv2.addWeighted(
             overlay,
             0.72,
-            self.frame,
+            canvas,
             0.28,
             0,
-            self.frame
+            canvas
         )
 
         for point in self.points:
             cv2.circle(
-                self.frame,
+                canvas,
                 point,
                 7,
                 (0, 255, 255),
@@ -242,17 +315,19 @@ class LineConfigurator:
 
         if len(self.points) == 2:
             cv2.line(
-                self.frame,
+                canvas,
                 self.points[0],
                 self.points[1],
                 (255, 0, 255),
                 3
             )
 
-            self._draw_direction_labels()
+            self._draw_direction_labels(
+                canvas
+            )
 
         cv2.putText(
-            self.frame,
+            canvas,
             "CONFIGURAR LINEA",
             (25, 40),
             cv2.FONT_HERSHEY_SIMPLEX,
@@ -262,7 +337,7 @@ class LineConfigurator:
         )
 
         cv2.putText(
-            self.frame,
+            canvas,
             "Click: marcar 2 puntos",
             (25, 72),
             cv2.FONT_HERSHEY_SIMPLEX,
@@ -272,7 +347,7 @@ class LineConfigurator:
         )
 
         cv2.putText(
-            self.frame,
+            canvas,
             "I: invertir IN / OUT",
             (25, 104),
             cv2.FONT_HERSHEY_SIMPLEX,
@@ -282,13 +357,17 @@ class LineConfigurator:
         )
 
         cv2.putText(
-            self.frame,
+            canvas,
             "S: guardar | Q: cancelar",
             (25, 136),
             cv2.FONT_HERSHEY_SIMPLEX,
             0.62,
             (0, 255, 0),
             2
+        )
+
+        self.frame = self._resize_for_preview(
+            canvas
         )
 
     def run(
@@ -298,19 +377,24 @@ class LineConfigurator:
         self.original_frame = (
             frame.copy()
         )
+        self._set_preview_geometry()
 
         line = self.config[
             "line"
         ]
 
         self.points = [
-            (
-                line["x1"],
-                line["y1"]
+            self._clamp_original_point(
+                (
+                    line["x1"],
+                    line["y1"]
+                )
             ),
-            (
-                line["x2"],
-                line["y2"]
+            self._clamp_original_point(
+                (
+                    line["x2"],
+                    line["y2"]
+                )
             )
         ]
 
@@ -320,9 +404,11 @@ class LineConfigurator:
             "CONFIGURAR LINEA"
         )
 
-        self._prepare_window(
+        # Mostramos ya un frame reducido al monitor, por eso AUTOSIZE deja
+        # coordenadas de mouse exactas y evita una segunda escala de HighGUI.
+        cv2.namedWindow(
             window_name,
-            self.original_frame
+            cv2.WINDOW_AUTOSIZE
         )
 
         cv2.setMouseCallback(
