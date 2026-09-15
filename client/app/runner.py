@@ -1,3 +1,22 @@
+import os
+
+# Estos limites deben definirse ANTES de importar cv2, torch o ultralytics.
+# De lo contrario MKL/OpenMP/OpenBLAS pueden crear un pool por cada nucleo y
+# saturar notebooks aunque PersonDetector use torch.set_num_threads().
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+os.environ.setdefault("MKL_NUM_THREADS", "1")
+os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+os.environ.setdefault("NUMEXPR_NUM_THREADS", "1")
+os.environ.setdefault("VECLIB_MAXIMUM_THREADS", "1")
+os.environ.setdefault("BLIS_NUM_THREADS", "1")
+
+# Mantiene el RTSP con baja latencia y evita acumulacion de frames dentro de
+# FFmpeg. El transporte TCP es estable para Tapo/Dahua/Hikvision.
+os.environ.setdefault(
+    "OPENCV_FFMPEG_CAPTURE_OPTIONS",
+    "rtsp_transport;tcp|fflags;nobuffer"
+)
+
 import ctypes
 import sys
 import traceback
