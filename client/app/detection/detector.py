@@ -30,8 +30,6 @@ class PersonDetector:
         self.device = 0 if self.cuda_enabled else "cpu"
         self.use_half = self.cuda_enabled
 
-        # OpenCV tambien puede crear un pool de hilos para resize/cvtColor.
-        # Un hilo es suficiente para estas operaciones pequeñas y evita picos.
         try:
             cv2.setNumThreads(1)
         except Exception:
@@ -57,15 +55,17 @@ class PersonDetector:
             max_distance=170
         )
 
-        # Motion gate: solo se activa automaticamente en el perfil liviano
-        # (imgsz <= 416 y CPU). No modifica el tracker ni el contador; evita
-        # llamar a YOLO cuando la escena esta quieta. Cada cierto tiempo hace
-        # una inferencia de refresco aunque no detecte movimiento.
+        # Motion gate exclusivo del perfil liviano. Cuando aparece movimiento
+        # o una persona, mantenemos una ventana activa para que el tracker vea
+        # varios frames consecutivos y no pierda el ID durante el cruce.
         self._motion_previous = None
         self._last_inference_at = 0.0
+        self._activity_until = 0.0
         self._idle_refresh_seconds = 1.5
         self._motion_threshold = 25
         self._motion_ratio = 0.008
+        self._motion_hold_seconds = 1.2
+        self._person_hold_seconds = 2.0
 
         print(f"[YOLO] Modelo cargado: {resolved_model}")
         self._print_device()
@@ -131,10 +131,11 @@ class PersonDetector:
         )
 
     def _background_motion_detected(self, frame):
-        # En CUDA el ahorro de CPU no compensa saltar inferencias. En modo
-        # visual (640 por defecto) tampoco se aplica para mantener la vista
-        # totalmente fluida durante configuracion y diagnostico.
         if self.cuda_enabled or self.imgsz > 416:
+            return True
+
+        now = time.monotonic()
+        if now < self._activity_until:
             return True
 
         height, width = frame.shape[:2]
@@ -159,6 +160,7 @@ class PersonDetector:
         self._motion_previous = gray
 
         if previous is None or previous.shape != gray.shape:
+            self._activity_until = now + self._motion_hold_seconds
             return True
 
         difference = cv2.absdiff(previous, gray)
@@ -175,10 +177,11 @@ class PersonDetector:
         )
 
         if changed_ratio >= self._motion_ratio:
+            self._activity_until = now + self._motion_hold_seconds
             return True
 
         return (
-            time.monotonic() - self._last_inference_at
+            now - self._last_inference_at
             >= self._idle_refresh_seconds
         )
 
@@ -197,6 +200,7 @@ class PersonDetector:
 
         self.imgsz = value
         self._motion_previous = None
+        self._activity_until = 0.0
         print(f"[YOLO] Tamano de inferencia: {self.imgsz}")
 
     def track(self, frame):
@@ -212,7 +216,8 @@ class PersonDetector:
             self._disable_cuda(error)
             results = self._predict(frame)
 
-        self._last_inference_at = time.monotonic()
+        now = time.monotonic()
+        self._last_inference_at = now
 
         detections = []
         if not results:
@@ -246,8 +251,15 @@ class PersonDetector:
                 "point": (point_x, point_y)
             })
 
+        if detections:
+            self._activity_until = max(
+                self._activity_until,
+                now + self._person_hold_seconds
+            )
+
         return self.tracker.update(detections)
 
     def reset_tracker(self):
         self.tracker.reset()
         self._motion_previous = None
+        self._activity_until = 0.0
