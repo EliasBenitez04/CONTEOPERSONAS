@@ -1,9 +1,13 @@
+import math
+
 import cv2
 
 from app.camera.rtsp import RTSPCamera
 from app.config.settings import settings, ENV_FILE
 from app.config.camera_config import (
+    get_line_points,
     load_camera_config,
+    normalize_camera_config,
     save_camera_config
 )
 from app.gui.line_config import LineConfigurator, fit_main_window
@@ -19,11 +23,22 @@ from app.api.sync import EventSynchronizer
 WINDOW_TITLE = "ContePersonas - Sistema Camara"
 
 
-def get_line(config):
-    return (
-        (config["line"]["x1"], config["line"]["y1"]),
-        (config["line"]["x2"], config["line"]["y2"])
-    )
+def representative_segment(points):
+    best = None
+    best_length = -1.0
+
+    for index in range(len(points) - 1):
+        p1 = points[index]
+        p2 = points[index + 1]
+        length = math.hypot(
+            p2[0] - p1[0],
+            p2[1] - p1[1]
+        )
+        if length > best_length:
+            best_length = length
+            best = (p1, p2)
+
+    return best
 
 
 def direction_positions(p1, p2, offset=58):
@@ -33,7 +48,7 @@ def direction_positions(p1, p2, offset=58):
     mid_y = (y1 + y2) / 2.0
     dx = x2 - x1
     dy = y2 - y1
-    length = max(1.0, (dx * dx + dy * dy) ** 0.5)
+    length = max(1.0, math.hypot(dx, dy))
     nx = -dy / length
     ny = dx / length
     return (
@@ -42,8 +57,16 @@ def direction_positions(p1, p2, offset=58):
     )
 
 
-def draw_direction_labels(frame, counter, line_p1, line_p2):
-    positive, negative = direction_positions(line_p1, line_p2)
+def draw_direction_labels(frame, counter, points):
+    segment = representative_segment(points)
+    if segment is None:
+        return
+
+    positive, negative = direction_positions(
+        segment[0],
+        segment[1]
+    )
+
     if counter.in_side == 1:
         in_pos = positive
         out_pos = negative
@@ -58,6 +81,23 @@ def draw_direction_labels(frame, counter, line_p1, line_p2):
     cv2.putText(
         frame, "OUT", out_pos,
         cv2.FONT_HERSHEY_SIMPLEX, 0.90, (0, 70, 255), 3
+    )
+
+
+def draw_counting_path(frame, counter, points):
+    for index in range(len(points) - 1):
+        cv2.line(
+            frame,
+            points[index],
+            points[index + 1],
+            (255, 0, 255),
+            3
+        )
+
+    draw_direction_labels(
+        frame,
+        counter,
+        points
     )
 
 
@@ -89,19 +129,28 @@ def draw_panel(frame, session_in, session_out, today_in, today_out):
     )
 
 
-def normalize_remote_config(remote):
-    return {
-        "line": {
-            "x1": int(remote["line"]["x1"]),
-            "y1": int(remote["line"]["y1"]),
-            "x2": int(remote["line"]["x2"]),
-            "y2": int(remote["line"]["y2"])
-        },
-        "in_side": 1 if int(remote.get("in_side", 1)) >= 0 else -1,
-        "margin": max(1, int(remote.get("margin", 18))),
-        "confidence": float(remote.get("confidence", 0.22)),
-        "config_version": int(remote.get("config_version", 0))
-    }
+def normalize_remote_config(remote, fallback_config=None):
+    remote_line = dict(remote.get("line") or {})
+
+    # Compatibilidad con servidores V3 anteriores: si todavia no devuelven
+    # points, no colapsamos una polilinea local recien calibrada a 2 puntos.
+    if not remote_line.get("points") and fallback_config is not None:
+        fallback_points = get_line_points(fallback_config)
+        if len(fallback_points) > 2:
+            remote_line["points"] = [
+                [point[0], point[1]]
+                for point in fallback_points
+            ]
+
+    return normalize_camera_config(
+        {
+            "line": remote_line,
+            "in_side": 1 if int(remote.get("in_side", 1)) >= 0 else -1,
+            "margin": max(1, int(remote.get("margin", 18))),
+            "confidence": float(remote.get("confidence", 0.22)),
+            "config_version": int(remote.get("config_version", 0))
+        }
+    )
 
 
 def prepare_remote_config(api_client, current_config, remote):
@@ -128,7 +177,7 @@ def prepare_remote_config(api_client, current_config, remote):
         )
 
     return (
-        normalize_remote_config(remote),
+        normalize_remote_config(remote, current_config),
         branch_id,
         camera_name,
         True
@@ -263,10 +312,9 @@ def main():
         cpu_threads=settings.YOLO_CPU_THREADS
     )
 
-    line_p1, line_p2 = get_line(config)
+    line_points = get_line_points(config)
     counter = LineCounter(
-        point1=line_p1,
-        point2=line_p2,
+        points=line_points,
         in_side=config["in_side"],
         margin=config["margin"]
     )
@@ -319,8 +367,7 @@ def main():
             )
 
             # En segundo plano trabajamos directamente sobre el ultimo ndarray
-            # publicado por la camara. Solo copiamos cuando realmente vamos a
-            # dibujar la interfaz, evitando una copia 1080p permanente.
+            # publicado por la camara. Solo copiamos cuando vamos a dibujar.
             if render_view:
                 frame = frame.copy()
 
@@ -358,14 +405,17 @@ def main():
                     remote_update = None
 
             if remote_update:
-                new_config = normalize_remote_config(remote_update)
+                new_config = normalize_remote_config(
+                    remote_update,
+                    config
+                )
                 runtime_branch_id = int(remote_update["branch_id"])
                 runtime_camera_name = str(remote_update["camera_name"])
                 config = new_config
                 save_camera_config(config)
 
-                line_p1, line_p2 = get_line(config)
-                counter.set_line(line_p1, line_p2)
+                line_points = get_line_points(config)
+                counter.set_line(points=line_points)
                 counter.set_in_side(config["in_side"], swap_counts=False)
                 counter.set_margin(config["margin"])
                 detector.set_confidence(config["confidence"])
@@ -392,18 +442,10 @@ def main():
             persons = detector.track(frame)
 
             if render_view:
-                cv2.line(
-                    frame,
-                    line_p1,
-                    line_p2,
-                    (255, 0, 255),
-                    3
-                )
-                draw_direction_labels(
+                draw_counting_path(
                     frame,
                     counter,
-                    line_p1,
-                    line_p2
+                    line_points
                 )
 
             for person in persons:
@@ -471,10 +513,10 @@ def main():
 
             if settings.TRAY_MODE:
                 footer = (
-                    "C: configurar linea | Minimizar/X: iconos ocultos | Q: salir"
+                    "C: configurar trazado | Minimizar/X: iconos ocultos | Q: salir"
                 )
             else:
-                footer = "C: configurar linea | Q: salir"
+                footer = "C: configurar trazado | Q: salir"
 
             cv2.putText(
                 frame,
@@ -521,7 +563,10 @@ def main():
                     publish = api_client.update_remote_config(config)
                     if publish["success"]:
                         remote_saved = publish["data"]
-                        config = normalize_remote_config(remote_saved)
+                        config = normalize_remote_config(
+                            remote_saved,
+                            config
+                        )
                         runtime_branch_id = int(remote_saved["branch_id"])
                         runtime_camera_name = str(remote_saved["camera_name"])
                         save_camera_config(config)
@@ -529,18 +574,18 @@ def main():
                         # quedado en cola justo antes del guardado local.
                         synchronizer.pop_remote_config()
                         print(
-                            "[CONFIG] Linea guardada localmente y enviada "
+                            "[CONFIG] Trazado guardado localmente y enviado "
                             "al servidor central. "
                             f"Version={config.get('config_version', 0)}"
                         )
                     else:
                         print(
-                            "[CONFIG] Linea guardada localmente, pero no se "
+                            "[CONFIG] Trazado guardado localmente, pero no se "
                             "pudo actualizar el servidor. "
                             f"HTTP={publish['status_code']} | {publish['error']}"
                         )
 
-                line_p1, line_p2 = get_line(config)
+                line_points = get_line_points(config)
                 new_in_side = 1 if int(config["in_side"]) >= 0 else -1
                 direction_changed = new_in_side != old_in_side
 
@@ -552,7 +597,7 @@ def main():
                     )
                     synchronizer.notify_new_event()
 
-                counter.set_line(line_p1, line_p2)
+                counter.set_line(points=line_points)
                 counter.set_in_side(
                     new_in_side,
                     swap_counts=direction_changed
@@ -580,7 +625,10 @@ def main():
                         "y registros locales de hoy."
                     )
                 else:
-                    print("[CONFIG] Nueva linea aplicada.")
+                    print(
+                        "[CONFIG] Nuevo trazado aplicado con "
+                        f"{len(line_points)} puntos."
+                    )
 
     except KeyboardInterrupt:
         print("\n[SISTEMA] Finalizando.")
@@ -589,6 +637,7 @@ def main():
         camera.stop()
         event_writer.close()
         synchronizer.close(final_sync=True)
+        api_client.close()
 
         if tray is not None:
             tray.stop()
