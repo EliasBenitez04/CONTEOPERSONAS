@@ -51,7 +51,7 @@ class PersonDetector:
         self.model = YOLO(str(resolved_model))
 
         self.tracker = Tracker(
-            max_missing=10,
+            max_missing=12,
             max_distance=150
         )
 
@@ -72,7 +72,7 @@ class PersonDetector:
         print(f"[YOLO] Tamano de inferencia: {self.imgsz}")
         if not self.cuda_enabled:
             print(f"[YOLO] Hilos CPU maximos: {self.cpu_threads}")
-        print("[TRACKER] ID inmediato y punto suavizado habilitados.")
+        print("[TRACKER] Prediccion de movimiento e IoU mejorados habilitados.")
         print("[YOLO] Motion gate de segundo plano habilitado.")
 
     @staticmethod
@@ -81,8 +81,7 @@ class PersonDetector:
 
         # Compatibilidad con .env anteriores: 640 pasa a 512 en vista y
         # 416 pasa a 320 en segundo plano. Las personas de puerta ocupan una
-        # porcion grande del cuadro, por lo que no necesitamos inferencia 640
-        # para mantener un conteo fiable.
+        # porcion grande del cuadro, por lo que no necesitamos inferencia 640.
         if value <= 416:
             value = 320
         else:
@@ -129,12 +128,14 @@ class PersonDetector:
         print(f"[YOLO] Hilos CPU maximos: {self.cpu_threads}")
 
     def _predict(self, frame):
+        # max_det=12 evita trabajo de NMS/tracking para detecciones que no son
+        # realistas en una puerta y mantiene liviano el ejecutable.
         return self.model.predict(
             source=frame,
             classes=[0],
             conf=self.confidence,
             imgsz=self.imgsz,
-            max_det=20,
+            max_det=12,
             verbose=False,
             device=self.device,
             half=self.use_half
@@ -152,9 +153,9 @@ class PersonDetector:
         if height <= 0 or width <= 0:
             return True
 
-        sample_width = 128
+        sample_width = 96
         sample_height = max(
-            72,
+            54,
             int(round(height * (sample_width / float(width))))
         )
 
