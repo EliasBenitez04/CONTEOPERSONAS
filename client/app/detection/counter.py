@@ -5,18 +5,48 @@ class LineCounter:
 
     def __init__(
         self,
-        point1,
-        point2,
+        point1=None,
+        point2=None,
+        points=None,
         in_side=1,
         margin=18
     ):
-        self.point1 = point1
-        self.point2 = point2
+        self.points = self._normalize_points(points, point1, point2)
+        self.point1 = self.points[0]
+        self.point2 = self.points[-1]
         self.in_side = 1 if int(in_side) >= 0 else -1
         self.entries = 0
         self.exits = 0
         self.states = {}
         self.set_margin(margin)
+
+    @staticmethod
+    def _normalize_points(points, point1=None, point2=None):
+        normalized = []
+
+        if points:
+            for point in points:
+                if point is None or len(point) < 2:
+                    continue
+                normalized.append((int(point[0]), int(point[1])))
+
+        if len(normalized) < 2:
+            p1 = point1 if point1 is not None else (640, 100)
+            p2 = point2 if point2 is not None else (640, 650)
+            normalized = [
+                (int(p1[0]), int(p1[1])),
+                (int(p2[0]), int(p2[1]))
+            ]
+
+        compact = [normalized[0]]
+        for point in normalized[1:]:
+            if point != compact[-1]:
+                compact.append(point)
+
+        if len(compact) < 2:
+            compact.append((compact[0][0], compact[0][1] + 1))
+
+        return compact
 
     @property
     def margin(self):
@@ -28,23 +58,22 @@ class LineCounter:
 
     def set_margin(self, margin):
         """
-        Configura la tolerancia sin hacer que un margen grande vuelva
-        imposible confirmar el cruce.
+        Configura una histeresis simetrica para IN y OUT.
 
-        El valor configurado sigue influyendo en la sensibilidad, pero los
-        umbrales internos quedan acotados. De esta forma IN y OUT usan
-        exactamente la misma histeresis aunque el margen sea alto.
+        El margen visual puede ser grande, pero los umbrales internos quedan
+        acotados para que ninguna direccion necesite recorrer una distancia
+        exagerada antes de confirmar el cruce.
         """
         self._margin = max(6, int(margin))
 
         self.crossing_margin = max(
-            4.0,
-            min(14.0, self._margin * 0.22)
+            3.0,
+            min(12.0, self._margin * 0.18)
         )
 
         self.rearm_margin = max(
-            self.crossing_margin + 2.0,
-            min(28.0, self._margin * 0.45)
+            self.crossing_margin + 3.0,
+            min(24.0, self._margin * 0.36)
         )
 
         if hasattr(self, "states"):
@@ -52,20 +81,60 @@ class LineCounter:
 
         return self._margin
 
-    def signed_distance(self, point):
+    @staticmethod
+    def _segment_distance(point, p1, p2):
         px, py = point
-        x1, y1 = self.point1
-        x2, y2 = self.point2
+        x1, y1 = p1
+        x2, y2 = p2
 
         dx = x2 - x1
         dy = y2 - y1
-        length = math.hypot(dx, dy)
+        length_sq = dx * dx + dy * dy
 
-        if length == 0:
-            return 0.0
+        if length_sq <= 0:
+            return None
 
-        value = dx * (py - y1) - dy * (px - x1)
-        return value / length
+        projection = (
+            (px - x1) * dx
+            + (py - y1) * dy
+        ) / float(length_sq)
+        projection = max(0.0, min(1.0, projection))
+
+        nearest_x = x1 + projection * dx
+        nearest_y = y1 + projection * dy
+        euclidean = math.hypot(
+            px - nearest_x,
+            py - nearest_y
+        )
+
+        length = math.sqrt(length_sq)
+        signed = (
+            dx * (py - y1)
+            - dy * (px - x1)
+        ) / length
+
+        # Fuera de la extension del segmento el signo sigue viniendo de la
+        # orientacion local, pero la distancia usa el punto proyectado real.
+        signed_distance = euclidean if signed >= 0 else -euclidean
+        return signed_distance
+
+    def signed_distance(self, point):
+        """Distancia firmada al segmento mas cercano de la polilinea."""
+        best = None
+
+        for index in range(len(self.points) - 1):
+            value = self._segment_distance(
+                point,
+                self.points[index],
+                self.points[index + 1]
+            )
+            if value is None:
+                continue
+
+            if best is None or abs(value) < abs(best):
+                best = value
+
+        return 0.0 if best is None else float(best)
 
     @staticmethod
     def _sign(value):
@@ -86,18 +155,22 @@ class LineCounter:
             self.states[track_id] = {
                 "origin_side": side,
                 "stable_side": None,
-                "armed": False
+                "armed": False,
+                "last_distance": distance
             }
 
         state = self.states[track_id]
+        previous_distance = state.get("last_distance", distance)
+        state["last_distance"] = distance
 
-        # Si el ID nacio cerca de la linea, conservamos el primer lado visto.
-        # Asi tambien se puede contar cuando el detector obtiene el ID apenas
-        # antes del cruce y no hubo tiempo de alejarse hasta rearm_margin.
+        # Si nace cerca del trazado y aparece luego del otro lado, se acepta el
+        # cruce siempre que haya una separacion minima. Esto evita perder pasos
+        # cuando la camara empieza a detectar muy cerca de la puerta.
         if state["stable_side"] is None:
             if (
                 side != state["origin_side"]
                 and abs(distance) >= self.crossing_margin
+                and previous_distance * distance <= 0
             ):
                 event = self._register_crossing(side)
                 state["stable_side"] = side
@@ -112,9 +185,6 @@ class LineCounter:
 
             return None
 
-        # Un cruce ya contado debe avanzar de nuevo claramente por el mismo
-        # lado antes de poder contar otro. Esto evita dobles conteos por
-        # vibracion del bounding box sobre la linea.
         if side == state["stable_side"]:
             if abs(distance) >= self.rearm_margin:
                 state["armed"] = True
@@ -124,6 +194,11 @@ class LineCounter:
             return None
 
         if abs(distance) < self.crossing_margin:
+            return None
+
+        # Para ambos sentidos se exige exactamente la misma condicion de
+        # cambio de signo. No hay reglas especiales para IN ni para OUT.
+        if previous_distance * distance > 0:
             return None
 
         event = self._register_crossing(side)
@@ -140,9 +215,10 @@ class LineCounter:
         self.exits += 1
         return "OUT"
 
-    def set_line(self, point1, point2):
-        self.point1 = point1
-        self.point2 = point2
+    def set_line(self, point1=None, point2=None, points=None):
+        self.points = self._normalize_points(points, point1, point2)
+        self.point1 = self.points[0]
+        self.point2 = self.points[-1]
         self.states.clear()
 
     def set_in_side(self, in_side, swap_counts=False):
