@@ -1,5 +1,6 @@
 import hashlib
 import hmac
+import json
 import secrets
 import uuid
 from datetime import datetime, timezone
@@ -40,6 +41,7 @@ class ClientConfigPayload(BaseModel):
     line_y1: int = Field(ge=0)
     line_x2: int = Field(ge=0)
     line_y2: int = Field(ge=0)
+    line_points: list[list[int]] | None = None
     in_side: int
     margin: int = Field(ge=1, le=300)
     confidence: int = Field(ge=1, le=99)
@@ -69,6 +71,60 @@ def _extract_bearer(authorization: str | None):
     if len(parts) != 2 or parts[0].lower() != "bearer":
         return None
     return parts[1].strip()
+
+
+def _normalize_line_points(points, x1, y1, x2, y2):
+    normalized = []
+
+    for point in points or []:
+        if not isinstance(point, (list, tuple)) or len(point) < 2:
+            continue
+        try:
+            normalized.append([
+                max(0, int(point[0])),
+                max(0, int(point[1]))
+            ])
+        except (TypeError, ValueError):
+            continue
+
+        if len(normalized) >= 128:
+            break
+
+    if len(normalized) < 2:
+        normalized = [
+            [max(0, int(x1)), max(0, int(y1))],
+            [max(0, int(x2)), max(0, int(y2))]
+        ]
+
+    compact = [normalized[0]]
+    for point in normalized[1:]:
+        if point != compact[-1]:
+            compact.append(point)
+
+    if len(compact) < 2:
+        compact.append([compact[0][0], compact[0][1] + 1])
+
+    return compact
+
+
+def _stored_line_points(config: ClientConfig):
+    points = None
+
+    if config.line_points:
+        try:
+            raw = json.loads(config.line_points)
+            if isinstance(raw, list):
+                points = raw
+        except (TypeError, ValueError, json.JSONDecodeError):
+            points = None
+
+    return _normalize_line_points(
+        points,
+        config.line_x1,
+        config.line_y1,
+        config.line_x2,
+        config.line_y2
+    )
 
 
 def resolve_machine_auth(
@@ -119,6 +175,8 @@ def resolve_machine_auth(
 
 
 def _config_payload(client: ClientDevice, config: ClientConfig):
+    points = _stored_line_points(config)
+
     return {
         "client_id": client.client_id,
         "branch_id": client.branch_id,
@@ -128,10 +186,11 @@ def _config_payload(client: ClientDevice, config: ClientConfig):
         "config_version": int(config.config_version or 0),
         "bootstrap_required": int(config.config_version or 0) <= 0,
         "line": {
-            "x1": config.line_x1,
-            "y1": config.line_y1,
-            "x2": config.line_x2,
-            "y2": config.line_y2
+            "x1": points[0][0],
+            "y1": points[0][1],
+            "x2": points[-1][0],
+            "y2": points[-1][1],
+            "points": points
         },
         "in_side": config.in_side,
         "margin": config.margin,
@@ -140,10 +199,19 @@ def _config_payload(client: ClientDevice, config: ClientConfig):
 
 
 def _apply_config_values(config: ClientConfig, payload: ClientConfigPayload):
-    config.line_x1 = payload.line_x1
-    config.line_y1 = payload.line_y1
-    config.line_x2 = payload.line_x2
-    config.line_y2 = payload.line_y2
+    points = _normalize_line_points(
+        payload.line_points,
+        payload.line_x1,
+        payload.line_y1,
+        payload.line_x2,
+        payload.line_y2
+    )
+
+    config.line_x1 = points[0][0]
+    config.line_y1 = points[0][1]
+    config.line_x2 = points[-1][0]
+    config.line_y2 = points[-1][1]
+    config.line_points = json.dumps(points, separators=(",", ":"))
     config.in_side = 1 if payload.in_side >= 0 else -1
     config.margin = payload.margin
     config.confidence = payload.confidence
@@ -152,6 +220,8 @@ def _apply_config_values(config: ClientConfig, payload: ClientConfigPayload):
 
 def client_to_dict(client: ClientDevice):
     config = client.config
+    points = _stored_line_points(config) if config else None
+
     return {
         "id": client.id,
         "client_id": client.client_id,
@@ -176,10 +246,11 @@ def client_to_dict(client: ClientDevice):
         ),
         "config": {
             "line": {
-                "x1": config.line_x1,
-                "y1": config.line_y1,
-                "x2": config.line_x2,
-                "y2": config.line_y2
+                "x1": points[0][0],
+                "y1": points[0][1],
+                "x2": points[-1][0],
+                "y2": points[-1][1],
+                "points": points
             },
             "in_side": config.in_side,
             "margin": config.margin,
@@ -272,12 +343,14 @@ def admin_create_client(
 
     try:
         database.flush()
+        default_points = [[640, 100], [640, 650]]
         config = ClientConfig(
             client_device_id=client.id,
             line_x1=640,
             line_y1=100,
             line_x2=640,
             line_y2=650,
+            line_points=json.dumps(default_points, separators=(",", ":")),
             in_side=1,
             margin=18,
             confidence=22,
