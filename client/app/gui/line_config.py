@@ -1,16 +1,18 @@
 import ctypes
+import math
 
 import cv2
 
 from app.config.camera_config import (
+    get_line_points,
     load_camera_config,
     save_camera_config
 )
 
 
 MAIN_WINDOW_NAME = "ContePersonas - Sistema Camara"
-SCREEN_MARGIN_X = 80
-SCREEN_MARGIN_Y = 120
+SCREEN_MARGIN_X = 36
+SCREEN_MARGIN_Y = 100
 
 
 class _Rect(ctypes.Structure):
@@ -46,7 +48,13 @@ def _screen_work_area():
 
 
 def fitted_frame_size(frame):
-    """Ajusta proporcionalmente al monitor sin usar un 1280x720 fijo."""
+    """
+    Ajusta proporcionalmente al area visible del monitor.
+
+    No usa 1280x720 ni limita el escalado a 1.0: una camara pequena puede
+    ocupar mas pantalla y una camara grande se reduce, siempre conservando su
+    relacion de aspecto.
+    """
     height, width = frame.shape[:2]
 
     if width <= 0 or height <= 0:
@@ -62,8 +70,7 @@ def fitted_frame_size(frame):
 
     scale = min(
         available_width / float(width),
-        available_height / float(height),
-        1.0
+        available_height / float(height)
     )
 
     return (
@@ -82,7 +89,7 @@ def _window_flags():
 
 
 def fit_main_window(window_name, frame):
-    """Prepara la vista principal para el monitor actual conservando ratio."""
+    """Ajusta la vista principal al monitor actual conservando el ratio."""
     width, height = fitted_frame_size(frame)
 
     cv2.namedWindow(
@@ -102,18 +109,18 @@ def fit_main_window(window_name, frame):
 class LineConfigurator:
 
     def __init__(self):
-        self.config = (
-            load_camera_config()
-        )
+        self.config = load_camera_config()
 
-        # Los puntos siempre se guardan en coordenadas REALES del stream.
-        # La vista puede ser mas pequena dependiendo del monitor.
+        # Todos los puntos se guardan en coordenadas REALES del stream.
         self.points = []
-
         self.original_frame = None
         self.frame = None
         self.preview_width = 0
         self.preview_height = 0
+
+        self.editing_started = False
+        self.drawing = False
+        self.minimum_point_distance = 10.0
 
     def _set_preview_geometry(self):
         self.preview_width, self.preview_height = (
@@ -151,20 +158,23 @@ class LineConfigurator:
         ):
             return frame
 
+        interpolation = (
+            cv2.INTER_AREA
+            if self.preview_width < width or self.preview_height < height
+            else cv2.INTER_LINEAR
+        )
+
         return cv2.resize(
             frame,
             (self.preview_width, self.preview_height),
-            interpolation=cv2.INTER_AREA
+            interpolation=interpolation
         )
 
     def _restore_main_window_size(self):
-        """Restaura el HWND principal sin destruirlo ni fijarlo a 1280x720."""
         if self.original_frame is None:
             return
 
-        width, height = fitted_frame_size(
-            self.original_frame
-        )
+        width, height = fitted_frame_size(self.original_frame)
 
         try:
             if hasattr(cv2, "WND_PROP_AUTOSIZE"):
@@ -182,6 +192,34 @@ class LineConfigurator:
         except cv2.error:
             pass
 
+    def _start_new_trace_if_needed(self):
+        if self.editing_started:
+            return
+
+        # El primer toque reemplaza la linea anterior. Asi no hace falta hacer
+        # un primer guardado intermedio ni borrar manualmente la linea vieja.
+        self.points = []
+        self.editing_started = True
+
+    def _append_preview_point(self, x, y, force=False):
+        self._start_new_trace_if_needed()
+        point = self._preview_to_original(x, y)
+
+        if self.points and not force:
+            last_x, last_y = self.points[-1]
+            distance = math.hypot(
+                point[0] - last_x,
+                point[1] - last_y
+            )
+            if distance < self.minimum_point_distance:
+                return False
+
+        if not self.points or point != self.points[-1]:
+            self.points.append(point)
+            return True
+
+        return False
+
     def mouse_event(
         self,
         event,
@@ -190,17 +228,47 @@ class LineConfigurator:
         flags,
         param
     ):
-        if event != cv2.EVENT_LBUTTONDOWN:
-            return
+        changed = False
 
-        if len(self.points) == 2:
-            self.points = []
+        if event == cv2.EVENT_LBUTTONDOWN:
+            self.drawing = True
+            changed = self._append_preview_point(x, y, force=True)
 
-        self.points.append(
-            self._preview_to_original(x, y)
-        )
+        elif event == cv2.EVENT_MOUSEMOVE and self.drawing:
+            if flags & cv2.EVENT_FLAG_LBUTTON:
+                changed = self._append_preview_point(x, y, force=False)
 
-        self.draw()
+        elif event == cv2.EVENT_LBUTTONUP:
+            if self.drawing:
+                changed = self._append_preview_point(x, y, force=True) or changed
+            self.drawing = False
+
+        elif event == cv2.EVENT_RBUTTONDOWN:
+            self.drawing = False
+            if self.editing_started and self.points:
+                self.points.pop()
+                changed = True
+
+        if changed:
+            self.draw()
+
+    @staticmethod
+    def _representative_segment(points):
+        best = None
+        best_length = -1.0
+
+        for index in range(len(points) - 1):
+            p1 = points[index]
+            p2 = points[index + 1]
+            length = math.hypot(
+                p2[0] - p1[0],
+                p2[1] - p1[1]
+            )
+            if length > best_length:
+                best_length = length
+                best = (p1, p2)
+
+        return best
 
     @staticmethod
     def _direction_positions(
@@ -211,20 +279,14 @@ class LineConfigurator:
         x1, y1 = p1
         x2, y2 = p2
 
-        mid_x = (
-            x1 + x2
-        ) / 2.0
-
-        mid_y = (
-            y1 + y2
-        ) / 2.0
-
+        mid_x = (x1 + x2) / 2.0
+        mid_y = (y1 + y2) / 2.0
         dx = x2 - x1
         dy = y2 - y1
 
         length = max(
             1.0,
-            (dx * dx + dy * dy) ** 0.5
+            math.hypot(dx, dy)
         )
 
         nx = -dy / length
@@ -243,14 +305,16 @@ class LineConfigurator:
         return positive, negative
 
     def _draw_direction_labels(self, canvas):
-        if len(self.points) != 2:
+        if len(self.points) < 2:
             return
 
-        positive, negative = (
-            self._direction_positions(
-                self.points[0],
-                self.points[1]
-            )
+        segment = self._representative_segment(self.points)
+        if segment is None:
+            return
+
+        positive, negative = self._direction_positions(
+            segment[0],
+            segment[1]
         )
 
         if int(self.config["in_side"]) >= 0:
@@ -281,16 +345,13 @@ class LineConfigurator:
         )
 
     def draw(self):
-        canvas = (
-            self.original_frame.copy()
-        )
-
+        canvas = self.original_frame.copy()
         overlay = canvas.copy()
 
         cv2.rectangle(
             overlay,
             (12, 12),
-            (470, 170),
+            (650, 214),
             (20, 20, 20),
             -1
         )
@@ -304,31 +365,29 @@ class LineConfigurator:
             canvas
         )
 
-        for point in self.points:
+        for index, point in enumerate(self.points):
             cv2.circle(
                 canvas,
                 point,
-                7,
+                6,
                 (0, 255, 255),
                 -1
             )
 
-        if len(self.points) == 2:
-            cv2.line(
-                canvas,
-                self.points[0],
-                self.points[1],
-                (255, 0, 255),
-                3
-            )
+            if index > 0:
+                cv2.line(
+                    canvas,
+                    self.points[index - 1],
+                    point,
+                    (255, 0, 255),
+                    3
+                )
 
-            self._draw_direction_labels(
-                canvas
-            )
+        self._draw_direction_labels(canvas)
 
         cv2.putText(
             canvas,
-            "CONFIGURAR LINEA",
+            "CONFIGURAR TRAZADO",
             (25, 40),
             cv2.FONT_HERSHEY_SIMPLEX,
             0.72,
@@ -338,74 +397,72 @@ class LineConfigurator:
 
         cv2.putText(
             canvas,
-            "Click: marcar 2 puntos",
+            "Click: puntos | Arrastrar: curva/polilinea",
             (25, 72),
             cv2.FONT_HERSHEY_SIMPLEX,
-            0.62,
+            0.58,
             (230, 230, 230),
             2
         )
 
         cv2.putText(
             canvas,
-            "I: invertir IN / OUT",
+            "Boton derecho / U: deshacer ultimo punto",
             (25, 104),
             cv2.FONT_HERSHEY_SIMPLEX,
-            0.62,
+            0.58,
+            (230, 230, 230),
+            2
+        )
+
+        cv2.putText(
+            canvas,
+            "R: empezar de cero | I: invertir IN / OUT",
+            (25, 136),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.58,
             (0, 255, 255),
             2
         )
 
         cv2.putText(
             canvas,
-            "S: guardar | Q: cancelar",
-            (25, 136),
+            "S/ENTER: guardar | Q/ESC: cancelar",
+            (25, 168),
             cv2.FONT_HERSHEY_SIMPLEX,
-            0.62,
+            0.58,
             (0, 255, 0),
             2
         )
 
-        self.frame = self._resize_for_preview(
-            canvas
+        cv2.putText(
+            canvas,
+            f"Puntos actuales: {len(self.points)}",
+            (25, 198),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.55,
+            (255, 255, 255),
+            2
         )
 
-    def run(
-        self,
-        frame
-    ):
-        self.original_frame = (
-            frame.copy()
-        )
+        self.frame = self._resize_for_preview(canvas)
+
+    def run(self, frame):
+        self.original_frame = frame.copy()
         self._set_preview_geometry()
 
-        line = self.config[
-            "line"
-        ]
-
         self.points = [
-            self._clamp_original_point(
-                (
-                    line["x1"],
-                    line["y1"]
-                )
-            ),
-            self._clamp_original_point(
-                (
-                    line["x2"],
-                    line["y2"]
-                )
-            )
+            self._clamp_original_point(point)
+            for point in get_line_points(self.config)
         ]
-
+        self.editing_started = False
+        self.drawing = False
         self.draw()
 
-        window_name = (
-            "CONFIGURAR LINEA"
-        )
+        window_name = "CONFIGURAR LINEA"
 
-        # Mostramos ya un frame reducido al monitor, por eso AUTOSIZE deja
-        # coordenadas de mouse exactas y evita una segunda escala de HighGUI.
+        # El frame ya esta ajustado al monitor; AUTOSIZE evita una segunda
+        # escala interna y mantiene exacta la conversion mouse -> stream.
         cv2.namedWindow(
             window_name,
             cv2.WINDOW_AUTOSIZE
@@ -419,79 +476,76 @@ class LineConfigurator:
         saved = False
 
         while True:
-            cv2.imshow(
-                window_name,
-                self.frame
-            )
+            cv2.imshow(window_name, self.frame)
 
-            key = (
-                cv2.waitKey(20)
-                & 0xFF
-            )
+            key = cv2.waitKey(20) & 0xFF
 
-            if key == ord("q"):
+            if key in (ord("q"), 27):
                 break
 
             if key == ord("i"):
-                self.config[
-                    "in_side"
-                ] = (
+                self.config["in_side"] = (
                     -1
-                    if int(
-                        self.config[
-                            "in_side"
-                        ]
-                    ) >= 0
+                    if int(self.config["in_side"]) >= 0
                     else 1
                 )
-
                 self.draw()
-
-                print(
-                    "[CONFIG] IN/OUT invertido."
-                )
-
+                print("[CONFIG] IN/OUT invertido.")
                 continue
 
-            if key == ord("s"):
-                if len(self.points) != 2:
+            if key == ord("r"):
+                self.points = []
+                self.editing_started = True
+                self.draw()
+                print("[CONFIG] Trazado reiniciado.")
+                continue
+
+            if key == ord("u"):
+                if self.points:
+                    self.points.pop()
+                    self.editing_started = True
+                    self.draw()
+                continue
+
+            if key in (ord("s"), 13):
+                if len(self.points) < 2:
                     print(
-                        "[CONFIG] Seleccione 2 puntos."
+                        "[CONFIG] El trazado necesita al menos 2 puntos."
                     )
                     continue
 
-                p1 = self.points[0]
-                p2 = self.points[1]
+                compact = [self.points[0]]
+                for point in self.points[1:]:
+                    if point != compact[-1]:
+                        compact.append(point)
 
-                self.config[
-                    "line"
-                ] = {
-                    "x1": p1[0],
-                    "y1": p1[1],
-                    "x2": p2[0],
-                    "y2": p2[1]
+                if len(compact) < 2:
+                    print(
+                        "[CONFIG] El trazado necesita al menos 2 puntos distintos."
+                    )
+                    continue
+
+                self.config["line"] = {
+                    "x1": compact[0][0],
+                    "y1": compact[0][1],
+                    "x2": compact[-1][0],
+                    "y2": compact[-1][1],
+                    "points": [
+                        [point[0], point[1]]
+                        for point in compact
+                    ]
                 }
 
-                save_camera_config(
-                    self.config
-                )
-
+                save_camera_config(self.config)
                 saved = True
 
                 print(
-                    "[CONFIG] Configuracion guardada."
+                    "[CONFIG] Trazado guardado desde el primer guardado "
+                    f"con {len(compact)} puntos."
                 )
-
                 break
 
-        cv2.destroyWindow(
-            window_name
-        )
-
+        cv2.destroyWindow(window_name)
         self._restore_main_window_size()
 
-        return (
-            self.config
-            if saved
-            else None
-        )
+        return self.config if saved else None

@@ -95,11 +95,37 @@ class APIClient:
     def _config_payload(local_config: dict):
         line = local_config.get("line", {})
         confidence = float(local_config.get("confidence", 0.22))
+
+        points = []
+        for point in line.get("points", []) or []:
+            if not isinstance(point, (list, tuple)) or len(point) < 2:
+                continue
+            try:
+                points.append([
+                    max(0, int(round(float(point[0])))),
+                    max(0, int(round(float(point[1]))))
+                ])
+            except (TypeError, ValueError):
+                continue
+
+        if len(points) < 2:
+            points = [
+                [
+                    int(line.get("x1", 640)),
+                    int(line.get("y1", 100))
+                ],
+                [
+                    int(line.get("x2", 640)),
+                    int(line.get("y2", 650))
+                ]
+            ]
+
         return {
-            "line_x1": int(line.get("x1", 640)),
-            "line_y1": int(line.get("y1", 100)),
-            "line_x2": int(line.get("x2", 640)),
-            "line_y2": int(line.get("y2", 650)),
+            "line_x1": int(points[0][0]),
+            "line_y1": int(points[0][1]),
+            "line_x2": int(points[-1][0]),
+            "line_y2": int(points[-1][1]),
+            "line_points": points,
             "in_side": 1 if int(local_config.get("in_side", 1)) >= 0 else -1,
             "margin": max(1, int(local_config.get("margin", 18))),
             "confidence": min(99, max(1, int(round(confidence * 100))))

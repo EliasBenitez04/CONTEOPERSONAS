@@ -46,8 +46,36 @@ def ensure_database_exists():
         connection.close()
 
 
+def ensure_schema_upgrades():
+    """Aplica cambios compatibles con PostgreSQL 9.5 sin borrar datos."""
+    with engine.begin() as connection:
+        exists = connection.execute(
+            text(
+                "SELECT 1 "
+                "FROM information_schema.columns "
+                "WHERE table_schema = 'public' "
+                "AND table_name = 'client_configs' "
+                "AND column_name = 'line_points'"
+            )
+        ).first()
+
+        if exists is None:
+            connection.execute(
+                text(
+                    "ALTER TABLE client_configs "
+                    "ADD COLUMN line_points TEXT NULL"
+                )
+            )
+            print(
+                "[DB] Migracion aplicada: "
+                "client_configs.line_points"
+            )
+
+
 def create_tables():
     Base.metadata.create_all(bind=engine)
+    ensure_schema_upgrades()
+
     with engine.connect() as connection:
         connection.execute(text("SELECT 1"))
 
