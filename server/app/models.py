@@ -121,6 +121,7 @@ class ClientConfig(Base):
     line_y1: Mapped[int] = mapped_column(Integer, nullable=False, default=100)
     line_x2: Mapped[int] = mapped_column(Integer, nullable=False, default=640)
     line_y2: Mapped[int] = mapped_column(Integer, nullable=False, default=650)
+    line_points: Mapped[str | None] = mapped_column(Text, nullable=True)
     in_side: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     margin: Mapped[int] = mapped_column(Integer, nullable=False, default=18)
     confidence: Mapped[int] = mapped_column(Integer, nullable=False, default=22)
