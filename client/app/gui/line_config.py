@@ -8,6 +8,7 @@ from app.config.camera_config import (
     load_camera_config,
     save_camera_config
 )
+from app.detection.counter import LineCounter
 
 
 MAIN_WINDOW_NAME = "ContePersonas - Sistema Camara"
@@ -317,7 +318,23 @@ class LineConfigurator:
             segment[1]
         )
 
-        if int(self.config["in_side"]) >= 0:
+        # Usa exactamente la misma distancia firmada que el contador real.
+        # De esta forma lo que se ve como IN/OUT coincide con lo que se guarda.
+        counter = LineCounter(
+            points=self.points,
+            in_side=self.config["in_side"],
+            margin=self.config.get("margin", 18)
+        )
+        positive_score = (
+            counter.signed_distance(positive)
+            * counter.in_side
+        )
+        negative_score = (
+            counter.signed_distance(negative)
+            * counter.in_side
+        )
+
+        if positive_score >= negative_score:
             in_pos = positive
             out_pos = negative
         else:
