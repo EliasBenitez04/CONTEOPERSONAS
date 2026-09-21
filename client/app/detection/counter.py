@@ -28,7 +28,10 @@ class LineCounter:
             for point in points:
                 if point is None or len(point) < 2:
                     continue
-                normalized.append((int(point[0]), int(point[1])))
+                normalized.append((
+                    int(round(point[0])),
+                    int(round(point[1]))
+                ))
 
         if len(normalized) < 2:
             p1 = point1 if point1 is not None else (640, 100)
@@ -58,22 +61,21 @@ class LineCounter:
 
     def set_margin(self, margin):
         """
-        Configura una histeresis simetrica para IN y OUT.
+        El margen se usa solamente como histeresis despues de un cruce real.
 
-        El margen visual puede ser grande, pero los umbrales internos quedan
-        acotados para que ninguna direccion necesite recorrer una distancia
-        exagerada antes de confirmar el cruce.
+        Nunca se usa para extender la linea ni para decidir un cruce por
+        proximidad. Un evento solo puede nacer de una interseccion geometrica
+        entre la trayectoria del punto de los pies y un segmento dibujado.
         """
         self._margin = max(6, int(margin))
 
         self.crossing_margin = max(
             3.0,
-            min(12.0, self._margin * 0.18)
+            min(10.0, self._margin * 0.16)
         )
-
         self.rearm_margin = max(
             self.crossing_margin + 3.0,
-            min(24.0, self._margin * 0.36)
+            min(22.0, self._margin * 0.34)
         )
 
         if hasattr(self, "states"):
@@ -82,7 +84,27 @@ class LineCounter:
         return self._margin
 
     @staticmethod
-    def _segment_distance(point, p1, p2):
+    def _line_signed_distance(point, p1, p2):
+        """Distancia perpendicular firmada a la recta del segmento."""
+        px, py = point
+        x1, y1 = p1
+        x2, y2 = p2
+
+        dx = x2 - x1
+        dy = y2 - y1
+        length = math.hypot(dx, dy)
+
+        if length <= 1e-9:
+            return None
+
+        return (
+            dx * (py - y1)
+            - dy * (px - x1)
+        ) / length
+
+    @staticmethod
+    def _segment_projection(point, p1, p2):
+        """Posicion normalizada del punto sobre el eje del segmento."""
         px, py = point
         x1, y1 = p1
         x2, y2 = p2
@@ -91,35 +113,44 @@ class LineCounter:
         dy = y2 - y1
         length_sq = dx * dx + dy * dy
 
-        if length_sq <= 0:
+        if length_sq <= 1e-9:
             return None
 
-        projection = (
+        return (
             (px - x1) * dx
             + (py - y1) * dy
         ) / float(length_sq)
-        projection = max(0.0, min(1.0, projection))
 
-        nearest_x = x1 + projection * dx
-        nearest_y = y1 + projection * dy
+    @classmethod
+    def _segment_distance(cls, point, p1, p2):
+        """
+        Distancia firmada al segmento FINITO.
+
+        La magnitud usa el punto mas cercano del segmento; el signo conserva la
+        orientacion del segmento. Esto sirve para etiquetas/histeresis, pero no
+        genera eventos de conteo.
+        """
+        projection = cls._segment_projection(point, p1, p2)
+        signed = cls._line_signed_distance(point, p1, p2)
+
+        if projection is None or signed is None:
+            return None
+
+        projection = max(0.0, min(1.0, projection))
+        x1, y1 = p1
+        x2, y2 = p2
+        nearest_x = x1 + projection * (x2 - x1)
+        nearest_y = y1 + projection * (y2 - y1)
+
         euclidean = math.hypot(
-            px - nearest_x,
-            py - nearest_y
+            point[0] - nearest_x,
+            point[1] - nearest_y
         )
 
-        length = math.sqrt(length_sq)
-        signed = (
-            dx * (py - y1)
-            - dy * (px - x1)
-        ) / length
-
-        # Fuera de la extension del segmento el signo sigue viniendo de la
-        # orientacion local, pero la distancia usa el punto proyectado real.
-        signed_distance = euclidean if signed >= 0 else -euclidean
-        return signed_distance
+        return euclidean if signed >= 0 else -euclidean
 
     def signed_distance(self, point):
-        """Distancia firmada al segmento mas cercano de la polilinea."""
+        """Distancia firmada al segmento real mas cercano."""
         best = None
 
         for index in range(len(self.points) - 1):
@@ -137,99 +168,227 @@ class LineCounter:
         return 0.0 if best is None else float(best)
 
     def side_of_point(self, point):
-        """Devuelve el lado real que usa el contador para ese punto."""
         return self._sign(self.signed_distance(point))
 
     @staticmethod
-    def _sign(value):
-        if value > 0:
+    def _sign(value, epsilon=1e-6):
+        if value > epsilon:
             return 1
-        if value < 0:
+        if value < -epsilon:
             return -1
         return 0
 
-    def update(self, track_id, point):
+    def _find_actual_crossing(self, previous_point, current_point):
         """
-        Actualiza el estado usando el punto inferior de la persona.
+        Busca un cruce REAL entre el movimiento del punto de los pies y la
+        polilinea dibujada.
 
-        El cambio de lado se recuerda aunque el primer frame despues del
-        cruce todavia este dentro de la banda de tolerancia. El evento se
-        confirma cuando el mismo track alcanza crossing_margin en el lado
-        destino. Esto evita perder cruces por FPS bajos o pasos rapidos.
+        No considera la prolongacion infinita de los segmentos. Si una persona
+        pasa alrededor de una punta o simplemente cambia de lado cerca de ella,
+        no existe interseccion y por tanto no hay conteo.
         """
-        distance = self.signed_distance(point)
-        side = self._sign(distance)
+        px, py = previous_point
+        cx, cy = current_point
 
-        if side == 0:
+        if math.hypot(cx - px, cy - py) < 0.5:
             return None
 
-        if track_id not in self.states:
-            stable_side = (
-                side
-                if abs(distance) >= self.rearm_margin
-                else None
+        epsilon = 1e-7
+
+        for index in range(len(self.points) - 1):
+            p1 = self.points[index]
+            p2 = self.points[index + 1]
+
+            previous_distance = self._line_signed_distance(
+                previous_point,
+                p1,
+                p2
             )
-            self.states[track_id] = {
-                "origin_side": side,
-                "stable_side": stable_side,
-                "armed": stable_side is not None,
-                "pending_side": None,
-                "last_distance": distance
-            }
+            current_distance = self._line_signed_distance(
+                current_point,
+                p1,
+                p2
+            )
+
+            if previous_distance is None or current_distance is None:
+                continue
+
+            previous_side = self._sign(previous_distance)
+            current_side = self._sign(current_distance)
+
+            # Si ambos puntos estan exactamente sobre el segmento, el pie se
+            # esta desplazando por la linea, no cruzandola.
+            if previous_side == 0 and current_side == 0:
+                continue
+
+            denominator = previous_distance - current_distance
+            if abs(denominator) <= epsilon:
+                continue
+
+            # Fraccion del movimiento en la que alcanza la recta del segmento.
+            movement_t = previous_distance / denominator
+            if movement_t < -epsilon or movement_t > 1.0 + epsilon:
+                continue
+
+            intersection = (
+                px + movement_t * (cx - px),
+                py + movement_t * (cy - py)
+            )
+
+            # CLAVE: la interseccion tiene que caer dentro del segmento
+            # dibujado. No se acepta la prolongacion imaginaria de la linea.
+            line_t = self._segment_projection(
+                intersection,
+                p1,
+                p2
+            )
+            if line_t is None:
+                continue
+
+            if line_t < -epsilon or line_t > 1.0 + epsilon:
+                continue
+
+            # Cruce directo entre dos lados.
+            if (
+                previous_side != 0
+                and current_side != 0
+                and previous_side != current_side
+            ):
+                return {
+                    "segment_index": index,
+                    "origin_side": previous_side,
+                    "destination_side": current_side,
+                    "destination_distance": abs(current_distance)
+                }
+
+            # El frame termino justo encima de la linea. Guardamos el contacto
+            # y esperamos a ver hacia que lado sale el mismo punto.
+            if previous_side != 0 and current_side == 0:
+                return {
+                    "segment_index": index,
+                    "origin_side": previous_side,
+                    "destination_side": None,
+                    "destination_distance": 0.0
+                }
+
+        return None
+
+    def _distance_from_segment_line(self, point, segment_index):
+        if segment_index < 0 or segment_index >= len(self.points) - 1:
+            return None
+
+        return self._line_signed_distance(
+            point,
+            self.points[segment_index],
+            self.points[segment_index + 1]
+        )
+
+    def _new_state(self, point):
+        distance = abs(self.signed_distance(point))
+        return {
+            "last_point": point,
+            "armed": distance >= self.rearm_margin,
+            "pending_crossing": None
+        }
+
+    def update(self, track_id, point):
+        """
+        Cuenta EXCLUSIVAMENTE por el punto inferior de la persona.
+
+        Requisitos para IN/OUT:
+        1. Debe existir un punto anterior del MISMO ID.
+        2. El segmento recorrido por ese punto debe cortar fisicamente la linea.
+        3. La interseccion debe estar dentro de la linea dibujada.
+        4. El punto debe confirmar que termino al otro lado.
+
+        Cuerpo, cabeza, bounding box, reflejos cercanos y cambios de lado fuera
+        de los extremos no pueden generar un evento por si solos.
+        """
+        current_point = (
+            float(point[0]),
+            float(point[1])
+        )
+
+        if track_id not in self.states:
+            self.states[track_id] = self._new_state(current_point)
             return None
 
         state = self.states[track_id]
-        state["last_distance"] = distance
+        previous_point = state["last_point"]
+        state["last_point"] = current_point
 
-        # Track nacido muy cerca de la linea: recordamos el primer lado y
-        # permitimos contar cuando confirma claramente el lado opuesto.
-        if state["stable_side"] is None:
-            if side != state["origin_side"]:
-                state["pending_side"] = side
+        pending = state.get("pending_crossing")
 
-            if (
-                state.get("pending_side") == side
-                and abs(distance) >= self.crossing_margin
-            ):
-                event = self._register_crossing(side)
-                state["stable_side"] = side
-                state["origin_side"] = side
-                state["armed"] = False
-                state["pending_side"] = None
-                return event
-
-            if abs(distance) >= self.rearm_margin:
-                state["stable_side"] = side
-                state["origin_side"] = side
-                state["armed"] = True
-                state["pending_side"] = None
-
-            return None
-
-        # Permanecer o volver al lado estable cancela un cruce incompleto.
-        if side == state["stable_side"]:
-            state["pending_side"] = None
-            if abs(distance) >= self.rearm_margin:
-                state["armed"] = True
-            return None
-
-        # Todavia no se alejo suficientemente del ultimo cruce.
+        # Despues de contar se exige separarse nuevamente de la linea antes de
+        # habilitar otro evento para el mismo ID.
         if not state["armed"]:
+            if abs(self.signed_distance(current_point)) >= self.rearm_margin:
+                state["armed"] = True
+            else:
+                return None
+
+        # Si el frame anterior termino justo sobre la linea, solo se confirma
+        # cuando ese mismo punto sale claramente por el lado contrario.
+        if pending is not None:
+            distance = self._distance_from_segment_line(
+                current_point,
+                pending["segment_index"]
+            )
+
+            if distance is not None:
+                side = self._sign(distance)
+                origin_side = pending["origin_side"]
+
+                if (
+                    side != 0
+                    and side != origin_side
+                    and abs(distance) >= self.crossing_margin
+                ):
+                    state["pending_crossing"] = None
+                    state["armed"] = False
+                    return self._register_crossing(side)
+
+                if (
+                    side == origin_side
+                    and abs(distance) >= self.crossing_margin
+                ):
+                    # Toco la linea pero regreso al mismo lado.
+                    state["pending_crossing"] = None
+
+            # Mientras sigue pegado a la linea no inventamos ningun evento.
+            if state.get("pending_crossing") is not None:
+                return None
+
+        crossing = self._find_actual_crossing(
+            previous_point,
+            current_point
+        )
+
+        if crossing is None:
             return None
 
-        # Ya cambio de lado. Aunque este primer punto quede dentro del margen,
-        # conservamos el destino y esperamos la confirmacion.
-        state["pending_side"] = side
+        origin_side = crossing["origin_side"]
+        destination_side = crossing["destination_side"]
 
-        if abs(distance) < self.crossing_margin:
+        if destination_side is None:
+            state["pending_crossing"] = {
+                "segment_index": crossing["segment_index"],
+                "origin_side": origin_side
+            }
             return None
 
-        event = self._register_crossing(side)
-        state["stable_side"] = side
-        state["origin_side"] = side
+        # El movimiento ya atraveso la linea finita. Si el punto quedo apenas
+        # encima, esperamos confirmacion para evitar jitter de 1-2 pixeles.
+        if crossing["destination_distance"] < self.crossing_margin:
+            state["pending_crossing"] = {
+                "segment_index": crossing["segment_index"],
+                "origin_side": origin_side
+            }
+            return None
+
+        state["pending_crossing"] = None
         state["armed"] = False
-        state["pending_side"] = None
-        return event
+        return self._register_crossing(destination_side)
 
     def _register_crossing(self, destination_side):
         if destination_side == self.in_side:
