@@ -284,10 +284,12 @@ class LineCounter:
         )
 
     def _new_state(self, point):
-        distance = abs(self.signed_distance(point))
+        # Un ID nuevo queda habilitado de inmediato, pero aun necesita DOS
+        # posiciones del punto y una interseccion real con la linea. Esto evita
+        # perder a una persona que YOLO detecta por primera vez cerca del umbral.
         return {
             "last_point": point,
-            "armed": distance >= self.rearm_margin,
+            "armed": True,
             "pending_crossing": None
         }
 
