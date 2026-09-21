@@ -93,23 +93,33 @@ class Settings:
     # Vista abierta: conserva suficiente fluidez para calibrar y diagnosticar.
     PROCESS_FPS = _env_float("PROCESS_FPS", 12.0, minimum=1.0)
 
-    # Perfil de produccion oculto. Los min() son intencionales: instalaciones
-    # existentes pueden conservar 5 FPS/512/2 hilos de una version anterior
-    # en .env. Esos valores ya no deben impedir que entre el perfil liviano.
+    # Perfil de produccion oculto. Menos de 5 FPS puede saltarse por completo
+    # el paso de un pie sobre la linea. Se permite hasta 8 FPS, pero el motion
+    # gate evita inferencias YOLO continuas cuando la zona esta quieta.
     BACKGROUND_PROCESS_FPS = min(
-        3.0,
-        _env_float("BACKGROUND_PROCESS_FPS", 3.0, minimum=1.0)
+        8.0,
+        max(
+            5.0,
+            _env_float("BACKGROUND_PROCESS_FPS", 6.0, minimum=1.0)
+        )
     )
 
     YOLO_IMGSZ = _env_int("YOLO_IMGSZ", 640, minimum=320)
     BACKGROUND_YOLO_IMGSZ = min(
-        416,
-        _env_int("BACKGROUND_YOLO_IMGSZ", 416, minimum=320)
+        480,
+        max(
+            384,
+            _env_int("BACKGROUND_YOLO_IMGSZ", 416, minimum=320)
+        )
     )
 
-    # En CPU se fuerza un solo hilo para que Torch/MKL no saturen notebooks.
-    # La lectura RTSP, sincronizacion y GUI mantienen sus propios hilos.
-    YOLO_CPU_THREADS = 1
+    # Se respeta el .env para poder ajustar cada PC. Un hilo sigue siendo el
+    # valor seguro por defecto; equipos de escritorio pueden usar 2 sin tocar
+    # el codigo.
+    YOLO_CPU_THREADS = min(
+        4,
+        _env_int("YOLO_CPU_THREADS", 1, minimum=1)
+    )
 
     MANAGED_CLIENT = bool(CLIENT_ID and CLIENT_TOKEN)
 
