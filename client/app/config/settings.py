@@ -57,7 +57,7 @@ def _env_float(name: str, default: float, minimum=None) -> float:
 
 
 class Settings:
-    APP_VERSION = os.getenv("APP_VERSION", "3.1.0")
+    APP_VERSION = os.getenv("APP_VERSION", "3.1.1")
 
     CAMERA_NAME = os.getenv("CAMERA_NAME", "CAMARA_01")
     CAMERA_RTSP_URL = os.getenv("CAMERA_RTSP_URL", "")
