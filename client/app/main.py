@@ -67,7 +67,18 @@ def draw_direction_labels(frame, counter, points):
         segment[1]
     )
 
-    if counter.in_side == 1:
+    # Las etiquetas se deciden con la MISMA geometria que usa el conteo.
+    # Asi la vista no puede quedar invertida respecto del evento registrado.
+    positive_score = (
+        counter.signed_distance(positive)
+        * counter.in_side
+    )
+    negative_score = (
+        counter.signed_distance(negative)
+        * counter.in_side
+    )
+
+    if positive_score >= negative_score:
         in_pos = positive
         out_pos = negative
     else:
@@ -205,8 +216,8 @@ def print_client_diagnostics():
         f"{settings.BACKGROUND_YOLO_IMGSZ}px"
     )
     print(
-        "[CLIENT] El detector limita automaticamente la inferencia a "
-        "512 px visible / 320 px segundo plano."
+        "[CLIENT] Inferencia optimizada: hasta 512 px visible y "
+        "384-480 px en segundo plano."
     )
     print(
         "[CLIENT] Hilos CPU YOLO: "
@@ -313,6 +324,8 @@ def main():
     )
 
     line_points = get_line_points(config)
+    detector.set_counting_line(line_points)
+
     counter = LineCounter(
         points=line_points,
         in_side=config["in_side"],
@@ -415,6 +428,7 @@ def main():
                 save_camera_config(config)
 
                 line_points = get_line_points(config)
+                detector.set_counting_line(line_points)
                 counter.set_line(points=line_points)
                 counter.set_in_side(config["in_side"], swap_counts=False)
                 counter.set_margin(config["margin"])
@@ -586,6 +600,7 @@ def main():
                         )
 
                 line_points = get_line_points(config)
+                detector.set_counting_line(line_points)
                 new_in_side = 1 if int(config["in_side"]) >= 0 else -1
                 direction_changed = new_in_side != old_in_side
 
