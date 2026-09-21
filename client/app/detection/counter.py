@@ -136,6 +136,10 @@ class LineCounter:
 
         return 0.0 if best is None else float(best)
 
+    def side_of_point(self, point):
+        """Devuelve el lado real que usa el contador para ese punto."""
+        return self._sign(self.signed_distance(point))
+
     @staticmethod
     def _sign(value):
         if value > 0:
@@ -145,6 +149,14 @@ class LineCounter:
         return 0
 
     def update(self, track_id, point):
+        """
+        Actualiza el estado usando el punto inferior de la persona.
+
+        El cambio de lado se recuerda aunque el primer frame despues del
+        cruce todavia este dentro de la banda de tolerancia. El evento se
+        confirma cuando el mismo track alcanza crossing_margin en el lado
+        destino. Esto evita perder cruces por FPS bajos o pasos rapidos.
+        """
         distance = self.signed_distance(point)
         side = self._sign(distance)
 
@@ -152,59 +164,71 @@ class LineCounter:
             return None
 
         if track_id not in self.states:
+            stable_side = (
+                side
+                if abs(distance) >= self.rearm_margin
+                else None
+            )
             self.states[track_id] = {
                 "origin_side": side,
-                "stable_side": None,
-                "armed": False,
+                "stable_side": stable_side,
+                "armed": stable_side is not None,
+                "pending_side": None,
                 "last_distance": distance
             }
+            return None
 
         state = self.states[track_id]
-        previous_distance = state.get("last_distance", distance)
         state["last_distance"] = distance
 
-        # Si nace cerca del trazado y aparece luego del otro lado, se acepta el
-        # cruce siempre que haya una separacion minima. Esto evita perder pasos
-        # cuando la camara empieza a detectar muy cerca de la puerta.
+        # Track nacido muy cerca de la linea: recordamos el primer lado y
+        # permitimos contar cuando confirma claramente el lado opuesto.
         if state["stable_side"] is None:
+            if side != state["origin_side"]:
+                state["pending_side"] = side
+
             if (
-                side != state["origin_side"]
+                state.get("pending_side") == side
                 and abs(distance) >= self.crossing_margin
-                and previous_distance * distance <= 0
             ):
                 event = self._register_crossing(side)
                 state["stable_side"] = side
                 state["origin_side"] = side
                 state["armed"] = False
+                state["pending_side"] = None
                 return event
 
             if abs(distance) >= self.rearm_margin:
                 state["stable_side"] = side
                 state["origin_side"] = side
                 state["armed"] = True
+                state["pending_side"] = None
 
             return None
 
+        # Permanecer o volver al lado estable cancela un cruce incompleto.
         if side == state["stable_side"]:
+            state["pending_side"] = None
             if abs(distance) >= self.rearm_margin:
                 state["armed"] = True
             return None
 
+        # Todavia no se alejo suficientemente del ultimo cruce.
         if not state["armed"]:
             return None
 
-        if abs(distance) < self.crossing_margin:
-            return None
+        # Ya cambio de lado. Aunque este primer punto quede dentro del margen,
+        # conservamos el destino y esperamos la confirmacion.
+        state["pending_side"] = side
 
-        # Para ambos sentidos se exige exactamente la misma condicion de
-        # cambio de signo. No hay reglas especiales para IN ni para OUT.
-        if previous_distance * distance > 0:
+        if abs(distance) < self.crossing_margin:
             return None
 
         event = self._register_crossing(side)
         state["stable_side"] = side
         state["origin_side"] = side
         state["armed"] = False
+        state["pending_side"] = None
         return event
 
     def _register_crossing(self, destination_side):
