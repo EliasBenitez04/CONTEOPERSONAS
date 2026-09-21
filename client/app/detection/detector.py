@@ -54,6 +54,7 @@ class PersonDetector:
             max_missing=12,
             max_distance=150
         )
+        self.counting_points = []
 
         # Motion gate exclusivo del perfil liviano. Cuando aparece movimiento
         # o una persona, mantenemos una ventana activa para que el tracker vea
@@ -77,16 +78,9 @@ class PersonDetector:
 
     @staticmethod
     def _normalize_imgsz(imgsz):
-        value = max(320, int(imgsz))
-
-        # Compatibilidad con .env anteriores: 640 pasa a 512 en vista y
-        # 416 pasa a 320 en segundo plano. Las personas de puerta ocupan una
-        # porcion grande del cuadro, por lo que no necesitamos inferencia 640.
-        if value <= 416:
-            value = 320
-        else:
-            value = min(value, 512)
-
+        # Mantiene 416 como 416. La version anterior convertia 416 -> 320 y
+        # reducia demasiado el detalle de piernas/pies en cruces estrechos.
+        value = max(320, min(512, int(imgsz)))
         return max(320, (value // 32) * 32)
 
     def _print_device(self):
@@ -135,11 +129,37 @@ class PersonDetector:
             classes=[0],
             conf=self.confidence,
             imgsz=self.imgsz,
-            max_det=12,
+            max_det=10,
             verbose=False,
             device=self.device,
             half=self.use_half
         )
+
+    def _motion_region(self, frame):
+        """Region amplia alrededor del trazado para el motion gate."""
+        if len(self.counting_points) < 2:
+            return frame
+
+        height, width = frame.shape[:2]
+        if height <= 0 or width <= 0:
+            return frame
+
+        xs = [point[0] for point in self.counting_points]
+        ys = [point[1] for point in self.counting_points]
+
+        pad_x = max(80, int(round(width * 0.10)))
+        pad_top = max(120, int(round(height * 0.30)))
+        pad_bottom = max(80, int(round(height * 0.18)))
+
+        x1 = max(0, min(xs) - pad_x)
+        x2 = min(width, max(xs) + pad_x)
+        y1 = max(0, min(ys) - pad_top)
+        y2 = min(height, max(ys) + pad_bottom)
+
+        if x2 - x1 < 32 or y2 - y1 < 32:
+            return frame
+
+        return frame[y1:y2, x1:x2]
 
     def _background_motion_detected(self, frame):
         if self.cuda_enabled or self.imgsz > 416:
@@ -149,7 +169,8 @@ class PersonDetector:
         if now < self._activity_until:
             return True
 
-        height, width = frame.shape[:2]
+        motion_frame = self._motion_region(frame)
+        height, width = motion_frame.shape[:2]
         if height <= 0 or width <= 0:
             return True
 
@@ -160,7 +181,7 @@ class PersonDetector:
         )
 
         small = cv2.resize(
-            frame,
+            motion_frame,
             (sample_width, sample_height),
             interpolation=cv2.INTER_AREA
         )
@@ -195,6 +216,20 @@ class PersonDetector:
             now - self._last_inference_at
             >= self._idle_refresh_seconds
         )
+
+    def set_counting_line(self, points):
+        normalized = []
+        for point in points or []:
+            if point is None or len(point) < 2:
+                continue
+            normalized.append((
+                int(round(point[0])),
+                int(round(point[1]))
+            ))
+
+        self.counting_points = normalized
+        self._motion_previous = None
+        self._activity_until = 0.0
 
     def set_confidence(self, confidence):
         value = float(confidence)
@@ -238,11 +273,17 @@ class PersonDetector:
         if result.boxes is None or len(result.boxes) == 0:
             return self.tracker.update(detections)
 
-        boxes = result.boxes.xyxy.cpu().tolist()
-        confidences = result.boxes.conf.cpu().tolist()
+        # Una sola transferencia CPU para coordenadas + confianza.
+        rows = result.boxes.data.detach().cpu().tolist()
 
-        for box, confidence in zip(boxes, confidences):
-            x1, y1, x2, y2 = box
+        frame_height, frame_width = frame.shape[:2]
+
+        for row in rows:
+            if len(row) < 5:
+                continue
+
+            x1, y1, x2, y2 = row[:4]
+            confidence = row[4]
             x1 = int(x1)
             y1 = int(y1)
             x2 = int(x2)
@@ -250,8 +291,17 @@ class PersonDetector:
 
             width = max(1, x2 - x1)
             height = max(1, y2 - y1)
-            point_x = x1 + (width // 2)
-            point_y = y2 - max(2, int(height * 0.06))
+
+            # Punto de conteo: centro inferior REAL del bounding box. Este es
+            # el punto que representa los pies y el unico usado para cruzar.
+            point_x = max(
+                0,
+                min(frame_width - 1, x1 + (width // 2))
+            )
+            point_y = max(
+                0,
+                min(frame_height - 1, y2)
+            )
 
             detections.append({
                 "x1": x1,
