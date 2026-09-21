@@ -279,14 +279,28 @@ class Tracker:
                 self._update_track(track_id, detection)
 
             track = self.tracks[track_id]
-            point_x, point_y = track["point"]
+
+            # El punto usado para CONTEO es siempre el punto bruto de esta
+            # deteccion: centro inferior del bbox. El punto suavizado queda
+            # solamente para asociacion/prediccion del ID y nunca puede crear
+            # un cruce que YOLO no haya observado realmente.
+            raw_point_x, raw_point_y = self._detection_point(
+                detection,
+                track["point"]
+            )
+            smooth_point_x, smooth_point_y = track["point"]
 
             item = dict(detection)
             item["id"] = track_id
             item["point"] = (
-                int(round(point_x)),
-                int(round(point_y))
+                int(round(raw_point_x)),
+                int(round(raw_point_y))
             )
+            item["tracking_point"] = (
+                int(round(smooth_point_x)),
+                int(round(smooth_point_y))
+            )
+            item["hits"] = int(track["hits"])
             output.append(item)
 
         self._remove_expired()
