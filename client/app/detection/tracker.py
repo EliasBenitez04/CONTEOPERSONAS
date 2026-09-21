@@ -157,6 +157,22 @@ class Tracker:
             dcy - predicted_y
         )
 
+        # El punto de conteo (centro inferior / pies) tambien participa en la
+        # asociacion. Ayuda a no intercambiar IDs cuando dos personas se
+        # superponen de cintura/cabeza pero sus apoyos siguen separados.
+        detected_point = self._detection_point(
+            detection,
+            (dcx, dcy)
+        )
+        predicted_point = (
+            track["point"][0] + track["vx"],
+            track["point"][1] + track["vy"]
+        )
+        foot_distance = math.hypot(
+            detected_point[0] - predicted_point[0],
+            detected_point[1] - predicted_point[1]
+        )
+
         diagonal = max(
             math.hypot(width, height),
             math.hypot(predicted_w, predicted_h)
@@ -191,7 +207,11 @@ class Tracker:
             if dot < 0:
                 direction_penalty = min(55.0, abs(dot) * 55.0)
 
-        if distance > dynamic_distance and iou < 0.025:
+        if (
+            distance > dynamic_distance
+            and foot_distance > dynamic_distance * 1.20
+            and iou < 0.025
+        ):
             return None
 
         stale_penalty = max(0, track["missing"] - 1) * 7.0
@@ -200,6 +220,7 @@ class Tracker:
         # bruscos de tamano/direccion penalizan intercambios de ID al cruzarse.
         return (
             distance
+            + (foot_distance * 0.18)
             - (iou * 155.0)
             + (size_delta * 45.0)
             + direction_penalty
@@ -318,12 +339,15 @@ class Tracker:
         )
         old_point_x, old_point_y = track["point"]
 
-        point_alpha = 0.72
+        # El eje Y del punto de pie debe reaccionar casi de inmediato para no
+        # retrasar el cruce. X conserva algo mas de suavizado contra jitter.
+        point_alpha_x = 0.82
+        point_alpha_y = 0.94
         track["point"] = (
-            old_point_x * (1.0 - point_alpha)
-            + measured_point_x * point_alpha,
-            old_point_y * (1.0 - point_alpha)
-            + measured_point_y * point_alpha
+            old_point_x * (1.0 - point_alpha_x)
+            + measured_point_x * point_alpha_x,
+            old_point_y * (1.0 - point_alpha_y)
+            + measured_point_y * point_alpha_y
         )
 
         track["box"] = box
