@@ -318,7 +318,60 @@ class PersonDetector:
                 now + self._person_hold_seconds
             )
 
-        return self.tracker.update(detections)
+        tracked = self.tracker.update(detections)
+        return self._classify_countable(tracked, frame_height)
+
+    @staticmethod
+    def _intersection_area(a, b):
+        ix1 = max(a["x1"], b["x1"])
+        iy1 = max(a["y1"], b["y1"])
+        ix2 = min(a["x2"], b["x2"])
+        iy2 = min(a["y2"], b["y2"])
+        return max(0, ix2 - ix1) * max(0, iy2 - iy1)
+
+    def _classify_countable(self, persons, frame_height):
+        """
+        V4: filtro conservador para no contar ninos/bebes.
+
+        No elimina detecciones del tracker: solo decide si ese ID puede generar
+        IN/OUT. La escala minima depende de la altura del pie en la imagen para
+        compensar perspectiva. Una deteccion pequena contenida dentro de una
+        persona mayor y cuyo borde inferior queda alto se considera cargada.
+        """
+        for person in persons:
+            person["countable"] = True
+            person["count_filter"] = "ADULT"
+            box_height = max(1, person["y2"] - person["y1"])
+            foot_y = max(1, person["point"][1])
+
+            # Perspectiva: cuanto mas abajo esta el pie, mayor debe ser una
+            # persona adulta aparente. Limites evitan extremos por resolucion.
+            min_adult_height = max(
+                105.0,
+                min(frame_height * 0.39, foot_y * 0.47)
+            )
+            if box_height < min_adult_height:
+                person["countable"] = False
+                person["count_filter"] = "SMALL_PERSON"
+
+        # Bebe/persona pequena cargada: bbox mayormente contenido y sin llegar
+        # al mismo nivel de piso que el adulto. No afecta al adulto portador.
+        for small in persons:
+            small_area = max(1, (small["x2"] - small["x1"]) * (small["y2"] - small["y1"]))
+            for large in persons:
+                if small["id"] == large["id"]:
+                    continue
+                large_area = max(1, (large["x2"] - large["x1"]) * (large["y2"] - large["y1"]))
+                if large_area <= small_area * 1.55:
+                    continue
+                overlap = self._intersection_area(small, large) / float(small_area)
+                floor_gap = large["y2"] - small["y2"]
+                if overlap >= 0.72 and floor_gap >= max(35, int(frame_height * 0.045)):
+                    small["countable"] = False
+                    small["count_filter"] = "CARRIED_PERSON"
+                    break
+
+        return persons
 
     def reset_tracker(self):
         self.tracker.reset()
