@@ -465,7 +465,8 @@ def main():
             for person in persons:
                 track_id = person["id"]
                 point = person["point"]
-                event = counter.update(track_id, point)
+                countable = bool(person.get("countable", True))
+                event = counter.update(track_id, point) if countable else None
 
                 if render_view:
                     x1 = person["x1"]
@@ -489,7 +490,11 @@ def main():
                     )
                     cv2.putText(
                         frame,
-                        f"ID {track_id} {person['confidence']:.2f}",
+                        (
+                            f"ID {track_id} {person['confidence']:.2f}"
+                            if countable
+                            else f"ID {track_id} NO CUENTA"
+                        ),
                         (x1, max(22, y1 - 10)),
                         cv2.FONT_HERSHEY_SIMPLEX,
                         0.62,
