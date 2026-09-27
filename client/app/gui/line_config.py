@@ -382,6 +382,31 @@ class LineConfigurator:
             canvas
         )
 
+        if len(self.points) >= 2:
+            corridor = canvas.copy()
+            corridor_width = max(
+                10,
+                int(round(self.config.get("margin", 18) * 2.0))
+            )
+
+            for index in range(1, len(self.points)):
+                cv2.line(
+                    corridor,
+                    self.points[index - 1],
+                    self.points[index],
+                    (120, 120, 120),
+                    corridor_width
+                )
+
+            cv2.addWeighted(
+                corridor,
+                0.24,
+                canvas,
+                0.76,
+                0,
+                canvas
+            )
+
         for index, point in enumerate(self.points):
             cv2.circle(
                 canvas,
@@ -414,7 +439,7 @@ class LineConfigurator:
 
         cv2.putText(
             canvas,
-            "Click: puntos | Arrastrar: curva/polilinea",
+            "Trazado = centro del corredor | Click/arrastrar",
             (25, 72),
             cv2.FONT_HERSHEY_SIMPLEX,
             0.58,
