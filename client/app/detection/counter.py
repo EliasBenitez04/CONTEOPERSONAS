@@ -1,17 +1,19 @@
 import math
+import time
 
 
 class LineCounter:
     """
-    Contador V4: maquina de estados por ID.
+    Contador V4.1: maquina de estados por ID con corredor de cruce.
 
     Un evento requiere:
-    - origen estable fuera de la zona neutral;
-    - interseccion geometrica REAL del punto de pies con la polilinea;
-    - destino estable durante varios frames;
+    - origen estable y suficientemente alejado del centro del corredor;
+    - interseccion geometrica REAL del punto de torso con la polilinea;
+    - destino estable fuera del corredor;
+    - recorrido perpendicular minimo;
     - rearmado solo despues de permanecer claramente en el lado destino.
 
-    Estar parado, oscilar o caminar sobre la linea no genera eventos.
+    Estar parado, oscilar, rozar o caminar sobre el corredor no genera eventos.
     """
 
     def __init__(self, point1=None, point2=None, points=None, in_side=1, margin=18):
@@ -26,6 +28,7 @@ class LineCounter:
         self.destination_frames = 2
         self.rearm_frames = 3
         self.max_step = 260.0
+        self.crossing_timeout_seconds = 3.0
         self.set_margin(margin)
 
     @staticmethod
@@ -57,9 +60,17 @@ class LineCounter:
 
     def set_margin(self, margin):
         self._margin = max(6, int(margin))
-        # V4 usa el margen como zona neutral/histeresis, no para extender linea.
-        self.crossing_margin = max(4.0, min(14.0, self._margin * 0.35))
-        self.rearm_margin = max(self.crossing_margin + 6.0, min(34.0, self._margin * 0.80))
+        # El margin configurado representa el corredor visible. La franja
+        # central absorbe jitter; la confirmacion ocurre mas afuera.
+        self.crossing_margin = max(6.0, min(24.0, self._margin * 0.60))
+        self.confirm_margin = max(
+            self.crossing_margin + 5.0,
+            min(42.0, self._margin * 1.00)
+        )
+        self.rearm_margin = max(
+            self.confirm_margin + 7.0,
+            min(56.0, self._margin * 1.55)
+        )
         if hasattr(self, "states"):
             self.states.clear()
         return self._margin
@@ -161,6 +172,7 @@ class LineCounter:
             "stable_count": 0,
             "origin_side": None,
             "crossed": False,
+            "crossed_at": None,
             "segment_index": None,
             "destination_side": None,
             "destination_count": 0,
@@ -169,10 +181,24 @@ class LineCounter:
             "rearm_count": 0,
         }
 
+    @staticmethod
+    def _cancel_crossing(state):
+        state["crossed"] = False
+        state["crossed_at"] = None
+        state["segment_index"] = None
+        state["destination_side"] = None
+        state["destination_count"] = 0
+
     def update(self, track_id, point):
         current = (float(point[0]), float(point[1]))
         if track_id not in self.states:
-            self.states[track_id] = self._new_state(current)
+            state = self._new_state(current)
+            distance = self.signed_distance(current)
+            side = 0 if abs(distance) < self.crossing_margin else self._sign(distance)
+            if side != 0 and abs(distance) >= self.confirm_margin:
+                state["stable_side"] = side
+                state["stable_count"] = 1
+            self.states[track_id] = state
             return None
 
         state = self.states[track_id]
@@ -180,9 +206,19 @@ class LineCounter:
         state["last_point"] = current
         distance = self.signed_distance(current)
         side = 0 if abs(distance) < self.crossing_margin else self._sign(distance)
+        now = time.monotonic()
 
-        # Tras un conteo, el ID solo se rearma tras permanecer claramente
-        # alejado en el lado al que llego. Jitter sobre la linea queda bloqueado.
+        if (
+            state["crossed"]
+            and state["crossed_at"] is not None
+            and now - state["crossed_at"] > self.crossing_timeout_seconds
+        ):
+            self._cancel_crossing(state)
+            state["origin_side"] = None
+            state["stable_side"] = None
+            state["stable_count"] = 0
+
+        # Tras un conteo, el ID solo se rearma cuando se alejo de verdad.
         if state["locked"]:
             if side == state["rearm_side"] and abs(distance) >= self.rearm_margin:
                 state["rearm_count"] += 1
@@ -191,16 +227,14 @@ class LineCounter:
                     state["stable_side"] = side
                     state["stable_count"] = self.stable_frames
                     state["origin_side"] = side
-                    state["crossed"] = False
-                    state["destination_side"] = None
-                    state["destination_count"] = 0
+                    self._cancel_crossing(state)
             else:
                 state["rearm_count"] = 0
             return None
 
-        # Antes de admitir un cruce, el ID debe demostrar un origen estable.
+        # El origen solo se valida fuera del corredor de confirmacion.
         if not state["crossed"]:
-            if side != 0:
+            if side != 0 and abs(distance) >= self.confirm_margin:
                 if side == state["stable_side"]:
                     state["stable_count"] += 1
                 else:
@@ -208,15 +242,22 @@ class LineCounter:
                     state["stable_count"] = 1
                 if state["stable_count"] >= self.stable_frames:
                     state["origin_side"] = side
+            elif side != 0 and side != state["stable_side"]:
+                state["stable_count"] = 0
 
             segment_index = self._find_actual_crossing(previous, current)
             if segment_index is not None and state["origin_side"] is not None:
-                # Solo aceptamos interseccion si venia del lado estable conocido.
                 previous_raw = self._line_signed_distance(
-                    previous, self.points[segment_index], self.points[segment_index + 1]
+                    previous,
+                    self.points[segment_index],
+                    self.points[segment_index + 1]
                 )
-                if previous_raw is not None and self._sign(previous_raw) == state["origin_side"]:
+                if (
+                    previous_raw is not None
+                    and self._sign(previous_raw) == state["origin_side"]
+                ):
                     state["crossed"] = True
+                    state["crossed_at"] = now
                     state["segment_index"] = segment_index
                     state["destination_side"] = -state["origin_side"]
                     state["destination_count"] = 0
@@ -224,30 +265,38 @@ class LineCounter:
             if not state["crossed"]:
                 return None
 
-        # Ya hubo interseccion real. Exigimos varios frames claros en destino.
+        # Cruzar el centro no alcanza: debe completar el recorrido y quedar
+        # estable fuera del corredor, evitando conteos por vibracion.
         segment_index = state["segment_index"]
         segment_distance = self._line_signed_distance(
-            current, self.points[segment_index], self.points[segment_index + 1]
+            current,
+            self.points[segment_index],
+            self.points[segment_index + 1]
         )
         if segment_distance is None:
             return None
 
-        segment_side = 0 if abs(segment_distance) < self.crossing_margin else self._sign(segment_distance)
+        segment_side = (
+            0
+            if abs(segment_distance) < self.crossing_margin
+            else self._sign(segment_distance)
+        )
         destination = state["destination_side"]
 
-        if segment_side == destination:
+        if (
+            segment_side == destination
+            and abs(segment_distance) >= self.confirm_margin
+        ):
             state["destination_count"] += 1
-        elif segment_side == state["origin_side"] and abs(segment_distance) >= self.crossing_margin:
-            # Toco/cruzo por jitter pero regreso al origen: cancelar.
-            state["crossed"] = False
-            state["segment_index"] = None
-            state["destination_side"] = None
-            state["destination_count"] = 0
+        elif (
+            segment_side == state["origin_side"]
+            and abs(segment_distance) >= self.confirm_margin
+        ):
+            self._cancel_crossing(state)
             state["stable_side"] = state["origin_side"]
             state["stable_count"] = self.stable_frames
             return None
         else:
-            # Sobre la zona neutral: mantener pendiente sin sumar.
             return None
 
         if state["destination_count"] < self.destination_frames:
@@ -256,9 +305,7 @@ class LineCounter:
         state["locked"] = True
         state["rearm_side"] = destination
         state["rearm_count"] = 0
-        state["crossed"] = False
-        state["segment_index"] = None
-        state["destination_count"] = 0
+        self._cancel_crossing(state)
         return self._register_crossing(destination)
 
     def _register_crossing(self, destination_side):
