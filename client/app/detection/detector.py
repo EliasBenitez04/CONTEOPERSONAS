@@ -396,7 +396,7 @@ class PersonDetector:
                 )
             )
             if (
-                int(person.get("hits", 1)) < 3
+                int(person.get("hits", 1)) < 2
                 or float(
                     person.get(
                         "max_displacement",
