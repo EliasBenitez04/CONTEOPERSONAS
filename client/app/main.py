@@ -96,6 +96,32 @@ def draw_direction_labels(frame, counter, points):
 
 
 def draw_counting_path(frame, counter, points):
+    # El trazado visible representa el CENTRO de un corredor. La franja gris
+    # muestra la distancia que debe atravesar el torso antes de confirmar.
+    overlay = frame.copy()
+    corridor_thickness = max(
+        10,
+        int(round(counter.confirm_margin * 2.0))
+    )
+
+    for index in range(len(points) - 1):
+        cv2.line(
+            overlay,
+            points[index],
+            points[index + 1],
+            (120, 120, 120),
+            corridor_thickness
+        )
+
+    cv2.addWeighted(
+        overlay,
+        0.24,
+        frame,
+        0.76,
+        0,
+        frame
+    )
+
     for index in range(len(points) - 1):
         cv2.line(
             frame,
@@ -114,7 +140,7 @@ def draw_counting_path(frame, counter, points):
 
 def draw_panel(frame, session_in, session_out, today_in, today_out):
     overlay = frame.copy()
-    cv2.rectangle(overlay, (12, 12), (405, 205), (18, 18, 18), -1)
+    cv2.rectangle(overlay, (12, 12), (435, 238), (18, 18, 18), -1)
     cv2.addWeighted(overlay, 0.74, frame, 0.26, 0, frame)
 
     cv2.putText(
@@ -129,7 +155,10 @@ def draw_panel(frame, session_in, session_out, today_in, today_out):
         frame, f"SALIDAS:  {session_out}", (28, 112),
         cv2.FONT_HERSHEY_SIMPLEX, 0.72, (0, 70, 255), 2
     )
+
     inside = max(0, today_in - today_out)
+    unmatched_out = max(0, today_out - today_in)
+
     cv2.putText(
         frame, f"DENTRO:   {inside}", (28, 146),
         cv2.FONT_HERSHEY_SIMPLEX, 0.72, (0, 255, 255), 2
@@ -137,6 +166,19 @@ def draw_panel(frame, session_in, session_out, today_in, today_out):
     cv2.putText(
         frame, f"HOY: IN {today_in} | OUT {today_out}", (28, 181),
         cv2.FONT_HERSHEY_SIMPLEX, 0.60, (220, 220, 220), 2
+    )
+    cv2.putText(
+        frame,
+        (
+            f"DESFASE OUT: {unmatched_out}"
+            if unmatched_out > 0
+            else "BALANCE: OK"
+        ),
+        (28, 216),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.58,
+        (0, 180, 255) if unmatched_out > 0 else (150, 255, 150),
+        2
     )
 
 
@@ -474,13 +516,20 @@ def main():
                     x2 = person["x2"]
                     y2 = person["y2"]
 
+                    box_color = (
+                        (0, 255, 0)
+                        if countable
+                        else (0, 180, 255)
+                    )
                     cv2.rectangle(
                         frame,
                         (x1, y1),
                         (x2, y2),
-                        (0, 255, 0),
+                        box_color,
                         2
                     )
+
+                    # Punto rojo grande = torso realmente usado por el contador.
                     cv2.circle(
                         frame,
                         point,
@@ -488,17 +537,41 @@ def main():
                         (0, 0, 255),
                         -1
                     )
+
+                    # Cabeza/pie son referencias auxiliares de diagnostico.
+                    head_point = person.get("head_point")
+                    foot_point = person.get("foot_point")
+                    if head_point:
+                        cv2.circle(
+                            frame,
+                            head_point,
+                            3,
+                            (255, 255, 0),
+                            -1
+                        )
+                    if foot_point:
+                        cv2.circle(
+                            frame,
+                            foot_point,
+                            3,
+                            (0, 255, 255),
+                            -1
+                        )
+
                     cv2.putText(
                         frame,
                         (
                             f"ID {track_id} {person['confidence']:.2f}"
                             if countable
-                            else f"ID {track_id} NO CUENTA"
+                            else (
+                                f"ID {track_id} "
+                                f"{person.get('count_filter', 'NO CUENTA')}"
+                            )
                         ),
                         (x1, max(22, y1 - 10)),
                         cv2.FONT_HERSHEY_SIMPLEX,
                         0.62,
-                        (0, 255, 0),
+                        box_color,
                         2
                     )
 
@@ -609,18 +682,14 @@ def main():
                 new_in_side = 1 if int(config["in_side"]) >= 0 else -1
                 direction_changed = new_in_side != old_in_side
 
+                # Cambiar la direccion afecta SOLO eventos futuros.
+                # Nunca se reescribe el historial ya observado del dia.
                 event_writer.flush()
-                if direction_changed:
-                    database.swap_today_event_types(
-                        branch_id=runtime_branch_id,
-                        camera_name=runtime_camera_name
-                    )
-                    synchronizer.notify_new_event()
 
                 counter.set_line(points=line_points)
                 counter.set_in_side(
                     new_in_side,
-                    swap_counts=direction_changed
+                    swap_counts=False
                 )
                 counter.set_margin(config["margin"])
                 detector.set_confidence(config["confidence"])
@@ -641,8 +710,8 @@ def main():
 
                 if direction_changed:
                     print(
-                        "[CONFIG] IN/OUT invertido en vista, conteo "
-                        "y registros locales de hoy."
+                        "[CONFIG] IN/OUT invertido para eventos futuros. "
+                        "El historial previo NO fue modificado."
                     )
                 else:
                     print(
