@@ -5,21 +5,17 @@ class Tracker:
     """
     Tracker liviano para el contador de puerta.
 
-    Mantiene IDs desde la primera deteccion y usa una prediccion de movimiento
-    inspirada en SORT/Kalman, sin agregar scipy/filterpy al ejecutable. La
-    asociacion combina centro predicho, IoU del bbox predicho, cambio de tamano
-    y antiguedad del track para conservar mejor el ID cuando dos personas se
-    acercan o YOLO pierde algunos frames.
+    Mantiene IDs desde la primera deteccion y usa prediccion de movimiento,
+    IoU, cambio de tamano y el ancla corporal para recuperar el mismo ID
+    despues de oclusiones breves.
+
+    La prediccion sirve SOLO para asociar IDs. El punto que llega al contador
+    se obtiene exclusivamente de detecciones reales recientes.
     """
 
-    def __init__(
-        self,
-        max_missing=12,
-        max_distance=150
-    ):
+    def __init__(self, max_missing=12, max_distance=150):
         self.max_missing = int(max_missing)
         self.max_distance = float(max_distance)
-
         self.next_id = 1
         self.tracks = {}
 
@@ -67,6 +63,23 @@ class Tracker:
         if not point:
             return fallback
         return float(point[0]), float(point[1])
+
+    @staticmethod
+    def _median_point(points):
+        if not points:
+            return 0.0, 0.0
+
+        xs = sorted(point[0] for point in points)
+        ys = sorted(point[1] for point in points)
+        middle = len(points) // 2
+
+        if len(points) % 2:
+            return xs[middle], ys[middle]
+
+        return (
+            (xs[middle - 1] + xs[middle]) / 2.0,
+            (ys[middle - 1] + ys[middle]) / 2.0
+        )
 
     @staticmethod
     def _box_from_center(center, width, height):
@@ -123,7 +136,10 @@ class Tracker:
         self.tracks[track_id] = {
             "box": box,
             "center": (cx, cy),
+            "origin_center": (cx, cy),
+            "max_displacement": 0.0,
             "point": (point_x, point_y),
+            "point_history": [(point_x, point_y)],
             "width": width,
             "height": height,
             "vx": 0.0,
@@ -157,9 +173,8 @@ class Tracker:
             dcy - predicted_y
         )
 
-        # El punto de conteo (centro inferior / pies) tambien participa en la
-        # asociacion. Ayuda a no intercambiar IDs cuando dos personas se
-        # superponen de cintura/cabeza pero sus apoyos siguen separados.
+        # El ancla del torso participa en la asociacion. Es mas estable que
+        # los pies cuando dos personas se tapan parcialmente.
         detected_point = self._detection_point(
             detection,
             (dcx, dcy)
@@ -168,7 +183,7 @@ class Tracker:
             track["point"][0] + track["vx"],
             track["point"][1] + track["vy"]
         )
-        foot_distance = math.hypot(
+        anchor_distance = math.hypot(
             detected_point[0] - predicted_point[0],
             detected_point[1] - predicted_point[1]
         )
@@ -205,22 +220,23 @@ class Tracker:
                 + track["vy"] * motion_y
             ) / (predicted_speed * measured_speed)
             if dot < 0:
-                direction_penalty = min(55.0, abs(dot) * 55.0)
+                direction_penalty = min(
+                    55.0,
+                    abs(dot) * 55.0
+                )
 
         if (
             distance > dynamic_distance
-            and foot_distance > dynamic_distance * 1.20
+            and anchor_distance > dynamic_distance * 1.20
             and iou < 0.025
         ):
             return None
 
         stale_penalty = max(0, track["missing"] - 1) * 7.0
 
-        # Menor costo = mejor asociacion. IoU alto compensa distancia; cambios
-        # bruscos de tamano/direccion penalizan intercambios de ID al cruzarse.
         return (
             distance
-            + (foot_distance * 0.18)
+            + (anchor_distance * 0.18)
             - (iou * 155.0)
             + (size_delta * 45.0)
             + direction_penalty
@@ -229,10 +245,10 @@ class Tracker:
 
     def update(self, detections):
         """
-        Recibe detecciones del frame actual y devuelve las mismas con ID.
+        Devuelve detecciones reales con ID.
 
-        Los IDs nacen inmediatamente. Cuando falta una deteccion el track sigue
-        vivo y su estado de movimiento permite recuperarlo al reaparecer.
+        Una oclusion breve mantiene vivo el track, pero nunca se devuelve una
+        posicion predicha como si fuera una observacion real de conteo.
         """
 
         for track in self.tracks.values():
@@ -252,8 +268,6 @@ class Tracker:
                     continue
                 candidates.append((cost, track_id, detection_index))
 
-        # Asociacion uno-a-uno global por costo. Para una puerta normalmente
-        # hay pocos tracks, por lo que ordenar los pares es rapido y estable.
         candidates.sort(key=lambda item: item[0])
 
         used_tracks = set()
@@ -280,27 +294,35 @@ class Tracker:
 
             track = self.tracks[track_id]
 
-            # El punto usado para CONTEO es siempre el punto bruto de esta
-            # deteccion: centro inferior del bbox. El punto suavizado queda
-            # solamente para asociacion/prediccion del ID y nunca puede crear
-            # un cruce que YOLO no haya observado realmente.
-            raw_point_x, raw_point_y = self._detection_point(
+            # Mediana de las ultimas 3 observaciones REALES. Reduce jitter del
+            # bbox sin usar una posicion inventada por prediccion.
+            raw_point = self._detection_point(
                 detection,
                 track["point"]
+            )
+            count_point = self._median_point(
+                track["point_history"]
             )
             smooth_point_x, smooth_point_y = track["point"]
 
             item = dict(detection)
             item["id"] = track_id
+            item["raw_point"] = (
+                int(round(raw_point[0])),
+                int(round(raw_point[1]))
+            )
             item["point"] = (
-                int(round(raw_point_x)),
-                int(round(raw_point_y))
+                int(round(count_point[0])),
+                int(round(count_point[1]))
             )
             item["tracking_point"] = (
                 int(round(smooth_point_x)),
                 int(round(smooth_point_y))
             )
             item["hits"] = int(track["hits"])
+            item["max_displacement"] = float(
+                track["max_displacement"]
+            )
             output.append(item)
 
         self._remove_expired()
@@ -325,8 +347,6 @@ class Tracker:
         measured_vw = new_width - track["width"]
         measured_vh = new_height - track["height"]
 
-        # Filtro alfa-beta liviano: conserva inercia pero reacciona rapido a
-        # cambios reales. Cumple el objetivo de Kalman/SORT sin dependencias.
         velocity_alpha = 0.62
         size_alpha = 0.35
 
@@ -353,15 +373,30 @@ class Tracker:
         )
         old_point_x, old_point_y = track["point"]
 
-        # El eje Y del punto de pie debe reaccionar casi de inmediato para no
-        # retrasar el cruce. X conserva algo mas de suavizado contra jitter.
+        # El torso admite un suavizado moderado. El punto final de conteo usa
+        # la mediana de observaciones reales, no este valor predictivo.
         point_alpha_x = 0.82
-        point_alpha_y = 0.94
+        point_alpha_y = 0.82
         track["point"] = (
             old_point_x * (1.0 - point_alpha_x)
             + measured_point_x * point_alpha_x,
             old_point_y * (1.0 - point_alpha_y)
             + measured_point_y * point_alpha_y
+        )
+
+        track["point_history"].append(
+            (measured_point_x, measured_point_y)
+        )
+        if len(track["point_history"]) > 3:
+            del track["point_history"][:-3]
+
+        origin_x, origin_y = track["origin_center"]
+        track["max_displacement"] = max(
+            track["max_displacement"],
+            math.hypot(
+                new_cx - origin_x,
+                new_cy - origin_y
+            )
         )
 
         track["box"] = box
