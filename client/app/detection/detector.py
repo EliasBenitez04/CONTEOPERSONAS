@@ -74,12 +74,14 @@ class PersonDetector:
         if not self.cuda_enabled:
             print(f"[YOLO] Hilos CPU maximos: {self.cpu_threads}")
         print("[TRACKER] Prediccion de movimiento e IoU mejorados habilitados.")
+        print(
+            "[CONTEO] Ancla corporal: torso 42% + "
+            "mediana de 3 detecciones reales."
+        )
         print("[YOLO] Motion gate de segundo plano habilitado.")
 
     @staticmethod
     def _normalize_imgsz(imgsz):
-        # Mantiene 416 como 416. La version anterior convertia 416 -> 320 y
-        # reducia demasiado el detalle de piernas/pies en cruces estrechos.
         value = max(320, min(512, int(imgsz)))
         return max(320, (value // 32) * 32)
 
@@ -122,8 +124,7 @@ class PersonDetector:
         print(f"[YOLO] Hilos CPU maximos: {self.cpu_threads}")
 
     def _predict(self, frame):
-        # max_det=12 evita trabajo de NMS/tracking para detecciones que no son
-        # realistas en una puerta y mantiene liviano el ejecutable.
+        # COCO class 0 = person. Objetos de otras clases nunca entran al tracker.
         return self.model.predict(
             source=frame,
             classes=[0],
@@ -273,9 +274,7 @@ class PersonDetector:
         if result.boxes is None or len(result.boxes) == 0:
             return self.tracker.update(detections)
 
-        # Una sola transferencia CPU para coordenadas + confianza.
         rows = result.boxes.data.detach().cpu().tolist()
-
         frame_height, frame_width = frame.shape[:2]
 
         for row in rows:
@@ -291,16 +290,28 @@ class PersonDetector:
 
             width = max(1, x2 - x1)
             height = max(1, y2 - y1)
-
-            # Punto de conteo: centro inferior REAL del bounding box. Este es
-            # el punto que representa los pies y el unico usado para cruzar.
-            point_x = max(
+            center_x = max(
                 0,
                 min(frame_width - 1, x1 + (width // 2))
             )
-            point_y = max(
-                0,
-                min(frame_height - 1, y2)
+
+            # Tres referencias reales del mismo bbox. El conteo principal usa
+            # torso porque es mas estable ante pies ocultos y estaturas distintas.
+            head_y = y1 + int(round(height * 0.12))
+            torso_y = y1 + int(round(height * 0.42))
+            foot_y = y2
+
+            head_point = (
+                center_x,
+                max(0, min(frame_height - 1, head_y))
+            )
+            torso_point = (
+                center_x,
+                max(0, min(frame_height - 1, torso_y))
+            )
+            foot_point = (
+                center_x,
+                max(0, min(frame_height - 1, foot_y))
             )
 
             detections.append({
@@ -309,7 +320,9 @@ class PersonDetector:
                 "x2": x2,
                 "y2": y2,
                 "confidence": float(confidence),
-                "point": (point_x, point_y)
+                "head_point": head_point,
+                "point": torso_point,
+                "foot_point": foot_point
             })
 
         if detections:
@@ -319,7 +332,10 @@ class PersonDetector:
             )
 
         tracked = self.tracker.update(detections)
-        return self._classify_countable(tracked, frame_height)
+        return self._classify_countable(
+            tracked,
+            frame_height
+        )
 
     @staticmethod
     def _intersection_area(a, b):
@@ -331,42 +347,106 @@ class PersonDetector:
 
     def _classify_countable(self, persons, frame_height):
         """
-        V4: filtro conservador para no contar ninos/bebes.
+        Filtro conservador de conteo.
 
-        No elimina detecciones del tracker: solo decide si ese ID puede generar
-        IN/OUT. La escala minima depende de la altura del pie en la imagen para
-        compensar perspectiva. Una deteccion pequena contenida dentro de una
-        persona mayor y cuyo borde inferior queda alto se considera cargada.
+        - Usa el pie solo para estimar perspectiva/tamano.
+        - Exige varias detecciones y desplazamiento real para evitar elementos
+          estaticos con forma humana.
+        - Mantiene el filtro de persona pequena/bebe cargado.
         """
         for person in persons:
             person["countable"] = True
             person["count_filter"] = "ADULT"
-            box_height = max(1, person["y2"] - person["y1"])
-            foot_y = max(1, person["point"][1])
 
-            # Perspectiva: cuanto mas abajo esta el pie, mayor debe ser una
-            # persona adulta aparente. Limites evitan extremos por resolucion.
+            box_height = max(
+                1,
+                person["y2"] - person["y1"]
+            )
+            foot_point = (
+                person.get("foot_point")
+                or (0, person["y2"])
+            )
+            foot_y = max(
+                1,
+                int(foot_point[1])
+            )
+
+            # Perspectiva: cuanto mas abajo aparece el pie, mayor debe ser el
+            # bbox aparente para considerarlo adulto.
             min_adult_height = max(
                 105.0,
-                min(frame_height * 0.39, foot_y * 0.47)
+                min(
+                    frame_height * 0.39,
+                    foot_y * 0.47
+                )
             )
             if box_height < min_adult_height:
                 person["countable"] = False
                 person["count_filter"] = "SMALL_PERSON"
+                continue
+
+            # Un maniqui/remera mal clasificado por YOLO suele permanecer
+            # estatico. Para habilitar conteo exigimos track confirmado y
+            # desplazamiento real del bbox.
+            min_motion = max(
+                7.0,
+                min(
+                    20.0,
+                    box_height * 0.04
+                )
+            )
+            if (
+                int(person.get("hits", 1)) < 3
+                or float(
+                    person.get(
+                        "max_displacement",
+                        0.0
+                    )
+                ) < min_motion
+            ):
+                person["countable"] = False
+                person["count_filter"] = "UNCONFIRMED_STATIC"
 
         # Bebe/persona pequena cargada: bbox mayormente contenido y sin llegar
         # al mismo nivel de piso que el adulto. No afecta al adulto portador.
         for small in persons:
-            small_area = max(1, (small["x2"] - small["x1"]) * (small["y2"] - small["y1"]))
+            small_area = max(
+                1,
+                (small["x2"] - small["x1"])
+                * (small["y2"] - small["y1"])
+            )
+
             for large in persons:
                 if small["id"] == large["id"]:
                     continue
-                large_area = max(1, (large["x2"] - large["x1"]) * (large["y2"] - large["y1"]))
+
+                large_area = max(
+                    1,
+                    (large["x2"] - large["x1"])
+                    * (large["y2"] - large["y1"])
+                )
                 if large_area <= small_area * 1.55:
                     continue
-                overlap = self._intersection_area(small, large) / float(small_area)
-                floor_gap = large["y2"] - small["y2"]
-                if overlap >= 0.72 and floor_gap >= max(35, int(frame_height * 0.045)):
+
+                overlap = (
+                    self._intersection_area(
+                        small,
+                        large
+                    )
+                    / float(small_area)
+                )
+                floor_gap = (
+                    large["y2"]
+                    - small["y2"]
+                )
+
+                if (
+                    overlap >= 0.72
+                    and floor_gap >= max(
+                        35,
+                        int(frame_height * 0.045)
+                    )
+                ):
                     small["countable"] = False
                     small["count_filter"] = "CARRIED_PERSON"
                     break
