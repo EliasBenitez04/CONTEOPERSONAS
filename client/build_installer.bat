@@ -18,8 +18,17 @@ for /f "delims=" %%I in ('where.exe ISCC.exe 2^>nul') do set "ISCC=%%I" & goto :
 goto :not_found
 
 :found_iscc
+set "APP_VERSION="
+for /f "usebackq delims=" %%V in (`".venv\Scripts\python.exe" -c "from app.config.settings import settings; print(settings.APP_VERSION)"`) do set "APP_VERSION=%%V"
+
+if not defined APP_VERSION (
+    echo [INSTALLER] No se pudo obtener APP_VERSION desde settings.py.
+    exit /b 1
+)
+
+echo [INSTALLER] Version: %APP_VERSION%
 echo [INSTALLER] Usando: %ISCC%
-"%ISCC%" "installer\ContePersonas.iss"
+"%ISCC%" /DMyAppVersion="%APP_VERSION%" "installer\ContePersonas.iss"
 if errorlevel 1 goto :compile_error
 
 echo [INSTALLER] Listo: client\dist\installer\SetupContePersonas.exe
