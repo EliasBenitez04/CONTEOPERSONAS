@@ -368,7 +368,7 @@ class LineConfigurator:
         cv2.rectangle(
             overlay,
             (12, 12),
-            (650, 214),
+            (760, 276),
             (20, 20, 20),
             -1
         )
@@ -382,11 +382,20 @@ class LineConfigurator:
             canvas
         )
 
+        preview_counter = None
+
         if len(self.points) >= 2:
+            preview_counter = LineCounter(
+                points=self.points,
+                in_side=self.config["in_side"],
+                margin=self.config.get("margin", 18)
+            )
+
+            # Franja externa: distancia efectiva para confirmar el destino.
             corridor = canvas.copy()
-            corridor_width = max(
+            confirm_width = max(
                 10,
-                int(round(self.config.get("margin", 18) * 2.0))
+                int(round(preview_counter.confirm_margin * 2.0))
             )
 
             for index in range(1, len(self.points)):
@@ -395,7 +404,7 @@ class LineConfigurator:
                     self.points[index - 1],
                     self.points[index],
                     (120, 120, 120),
-                    corridor_width
+                    confirm_width
                 )
 
             cv2.addWeighted(
@@ -403,6 +412,31 @@ class LineConfigurator:
                 0.24,
                 canvas,
                 0.76,
+                0,
+                canvas
+            )
+
+            # Franja interna: zona neutral donde no se decide IN/OUT.
+            neutral = canvas.copy()
+            neutral_width = max(
+                8,
+                int(round(preview_counter.crossing_margin * 2.0))
+            )
+
+            for index in range(1, len(self.points)):
+                cv2.line(
+                    neutral,
+                    self.points[index - 1],
+                    self.points[index],
+                    (70, 70, 70),
+                    neutral_width
+                )
+
+            cv2.addWeighted(
+                neutral,
+                0.32,
+                canvas,
+                0.68,
                 0,
                 canvas
             )
@@ -469,7 +503,7 @@ class LineConfigurator:
 
         cv2.putText(
             canvas,
-            "S/ENTER: guardar | Q/ESC: cancelar",
+            "+/-: ajustar margen | S/ENTER: guardar",
             (25, 168),
             cv2.FONT_HERSHEY_SIMPLEX,
             0.58,
@@ -477,14 +511,54 @@ class LineConfigurator:
             2
         )
 
+        margin_value = max(
+            6,
+            min(
+                60,
+                int(self.config.get("margin", 18))
+            )
+        )
+
+        if preview_counter is not None:
+            margin_text = (
+                f"Margen: {margin_value}px | "
+                f"Neutral +/-{preview_counter.crossing_margin:.1f}px | "
+                f"Confirmar +/-{preview_counter.confirm_margin:.1f}px"
+            )
+        else:
+            margin_text = f"Margen: {margin_value}px"
+
         cv2.putText(
             canvas,
-            f"Puntos actuales: {len(self.points)}",
-            (25, 198),
+            margin_text,
+            (25, 200),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.55,
+            (255, 255, 0),
+            2
+        )
+
+        cv2.putText(
+            canvas,
+            (
+                f"Puntos: {len(self.points)} | "
+                "Q/ESC: cancelar"
+            ),
+            (25, 232),
             cv2.FONT_HERSHEY_SIMPLEX,
             0.55,
             (255, 255, 255),
             2
+        )
+
+        cv2.putText(
+            canvas,
+            "Gris = confirmacion | centro oscuro = zona neutral",
+            (25, 262),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.50,
+            (210, 210, 210),
+            1
         )
 
         self.frame = self._resize_for_preview(canvas)
@@ -524,6 +598,36 @@ class LineConfigurator:
 
             if key in (ord("q"), 27):
                 break
+
+            if key in (ord("+"), ord("=")):
+                self.config["margin"] = min(
+                    60,
+                    max(
+                        6,
+                        int(self.config.get("margin", 18)) + 1
+                    )
+                )
+                self.draw()
+                print(
+                    "[CONFIG] Margen aumentado: "
+                    f"{self.config['margin']} px"
+                )
+                continue
+
+            if key in (ord("-"), ord("_")):
+                self.config["margin"] = max(
+                    6,
+                    min(
+                        60,
+                        int(self.config.get("margin", 18)) - 1
+                    )
+                )
+                self.draw()
+                print(
+                    "[CONFIG] Margen reducido: "
+                    f"{self.config['margin']} px"
+                )
+                continue
 
             if key == ord("i"):
                 self.config["in_side"] = (
