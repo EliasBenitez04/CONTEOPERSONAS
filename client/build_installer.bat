@@ -19,7 +19,7 @@ goto :not_found
 
 :found_iscc
 set "APP_VERSION="
-for /f "usebackq delims=" %%V in (`".venv\Scripts\python.exe" -c "from app.config.settings import settings; print(settings.APP_VERSION)"`) do set "APP_VERSION=%%V"
+for /f "delims=" %%V in ('.venv\Scripts\python.exe -c "from app.config.settings import settings; print(settings.APP_VERSION)"') do set "APP_VERSION=%%V"
 
 if not defined APP_VERSION (
     echo [INSTALLER] No se pudo obtener APP_VERSION desde settings.py.
