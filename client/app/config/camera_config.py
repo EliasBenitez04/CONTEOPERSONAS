@@ -78,7 +78,13 @@ def normalize_camera_config(config):
     merged.update(source)
     merged["line"] = normalize_line(source.get("line", merged["line"]))
     merged["in_side"] = 1 if int(merged.get("in_side", 1)) >= 0 else -1
-    merged["margin"] = max(1, int(merged.get("margin", 18)))
+    merged["margin"] = max(
+        6,
+        min(
+            60,
+            int(merged.get("margin", 18))
+        )
+    )
     merged["confidence"] = min(
         0.99,
         max(0.01, float(merged.get("confidence", 0.22)))
