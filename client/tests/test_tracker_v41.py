@@ -3,14 +3,26 @@ import unittest
 from app.detection.tracker import Tracker
 
 
-def detection(x1, y1, x2, y2, point):
+def detection(
+    x1,
+    y1,
+    x2,
+    y2,
+    point,
+    foot_point=None
+):
     return {
         "x1": x1,
         "y1": y1,
         "x2": x2,
         "y2": y2,
         "confidence": 0.90,
-        "point": point
+        "point": point,
+        "foot_point": (
+            foot_point
+            if foot_point is not None
+            else point
+        )
     }
 
 
@@ -35,6 +47,39 @@ class TrackerV41Tests(unittest.TestCase):
         self.assertEqual(
             result["point"],
             (21, 40)
+        )
+
+    def test_movement_point_uses_real_foot_median(self):
+        tracker = Tracker(
+            max_missing=3,
+            max_distance=100
+        )
+
+        tracker.update([
+            detection(
+                0, 0, 40, 100,
+                (20, 40),
+                (20, 90)
+            )
+        ])
+        tracker.update([
+            detection(
+                1, 1, 41, 101,
+                (21, 43),
+                (21, 94)
+            )
+        ])
+        result = tracker.update([
+            detection(
+                2, 2, 42, 102,
+                (22, 39),
+                (22, 91)
+            )
+        ])[0]
+
+        self.assertEqual(
+            result["movement_point"],
+            (21, 91)
         )
 
     def test_short_occlusion_keeps_same_id(self):
