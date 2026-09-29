@@ -144,8 +144,13 @@ def draw_panel(frame, session_in, session_out, today_in, today_out):
     cv2.addWeighted(overlay, 0.74, frame, 0.26, 0, frame)
 
     cv2.putText(
-        frame, "CONTEO - SESION", (28, 42),
-        cv2.FONT_HERSHEY_SIMPLEX, 0.75, (255, 255, 255), 2
+        frame,
+        f"CONTEO - SESION | V{settings.APP_VERSION}",
+        (28, 42),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.68,
+        (255, 255, 255),
+        2
     )
     cv2.putText(
         frame, f"ENTRADAS: {session_in}", (28, 78),
