@@ -43,7 +43,7 @@ class ClientConfigPayload(BaseModel):
     line_y2: int = Field(ge=0)
     line_points: list[list[int]] | None = None
     in_side: int
-    margin: int = Field(ge=1, le=300)
+    margin: int = Field(ge=6, le=60)
     confidence: int = Field(ge=1, le=99)
 
 
