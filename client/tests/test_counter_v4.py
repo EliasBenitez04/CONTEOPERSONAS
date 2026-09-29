@@ -21,6 +21,26 @@ class LineCounterV41Tests(unittest.TestCase):
                 events.append(event)
         return events
 
+    @staticmethod
+    def feed_with_movement(
+        counter,
+        track_id,
+        samples
+    ):
+        events = []
+
+        for point, movement_point in samples:
+            event = counter.update(
+                track_id,
+                point,
+                movement_point
+            )
+
+            if event:
+                events.append(event)
+
+        return events
+
     def test_normal_in_counts_once(self):
         counter = self.make_counter()
         events = self.feed(
@@ -114,6 +134,84 @@ class LineCounterV41Tests(unittest.TestCase):
             ]
         )
         self.assertEqual(events, ["IN", "OUT"])
+
+    def test_crouch_and_stand_on_line_does_not_count(self):
+        counter = self.make_counter()
+
+        events = self.feed_with_movement(
+            counter,
+            7,
+            [
+                ((100, 70), (100, 180)),
+                ((100, 72), (100, 181)),
+                ((100, 88), (100, 180)),
+                ((100, 105), (100, 181)),
+                ((100, 122), (100, 182)),
+                ((100, 125), (100, 181)),
+                ((100, 108), (100, 180)),
+                ((100, 92), (100, 181)),
+                ((100, 72), (100, 180)),
+                ((100, 70), (100, 181)),
+            ]
+        )
+
+        self.assertEqual(events, [])
+
+    def test_fast_torso_jitter_with_static_feet_does_not_count(self):
+        counter = self.make_counter()
+
+        events = self.feed_with_movement(
+            counter,
+            8,
+            [
+                ((100, 70), (100, 180)),
+                ((100, 72), (100, 181)),
+                ((100, 125), (100, 180)),
+                ((100, 128), (100, 182)),
+                ((100, 70), (100, 181)),
+                ((100, 68), (100, 180)),
+                ((100, 126), (100, 181)),
+                ((100, 130), (100, 182)),
+            ]
+        )
+
+        self.assertEqual(events, [])
+
+    def test_real_walk_counts_when_feet_progress_too(self):
+        counter = self.make_counter()
+
+        events = self.feed_with_movement(
+            counter,
+            9,
+            [
+                ((100, 65), (100, 170)),
+                ((100, 70), (100, 175)),
+                ((100, 88), (100, 185)),
+                ((100, 104), (100, 198)),
+                ((100, 122), (100, 215)),
+                ((100, 128), (100, 225)),
+            ]
+        )
+
+        self.assertEqual(events, ["IN"])
+
+    def test_real_out_counts_when_feet_progress_back(self):
+        counter = self.make_counter()
+
+        events = self.feed_with_movement(
+            counter,
+            10,
+            [
+                ((100, 135), (100, 225)),
+                ((100, 130), (100, 220)),
+                ((100, 112), (100, 210)),
+                ((100, 98), (100, 195)),
+                ((100, 80), (100, 178)),
+                ((100, 72), (100, 168)),
+            ]
+        )
+
+        self.assertEqual(events, ["OUT"])
 
     def test_crossing_outside_segment_does_not_count(self):
         counter = self.make_counter()
