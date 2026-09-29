@@ -507,8 +507,20 @@ def main():
             for person in persons:
                 track_id = person["id"]
                 point = person["point"]
+                movement_point = person.get(
+                    "movement_point",
+                    person.get("foot_point", point)
+                )
                 countable = bool(person.get("countable", True))
-                event = counter.update(track_id, point) if countable else None
+                event = (
+                    counter.update(
+                        track_id,
+                        point,
+                        movement_point
+                    )
+                    if countable
+                    else None
+                )
 
                 if render_view:
                     x1 = person["x1"]
@@ -541,6 +553,7 @@ def main():
                     # Cabeza/pie son referencias auxiliares de diagnostico.
                     head_point = person.get("head_point")
                     foot_point = person.get("foot_point")
+                    movement_point = person.get("movement_point")
                     if head_point:
                         cv2.circle(
                             frame,
@@ -556,6 +569,15 @@ def main():
                             3,
                             (0, 255, 255),
                             -1
+                        )
+
+                    if movement_point:
+                        cv2.circle(
+                            frame,
+                            movement_point,
+                            5,
+                            (255, 0, 0),
+                            1
                         )
 
                     cv2.putText(
