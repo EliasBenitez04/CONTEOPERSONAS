@@ -202,6 +202,53 @@ class TrackerV41Tests(unittest.TestCase):
                 expected_ids["B"]
             )
 
+    def test_two_people_same_direction_keep_separate_ids(self):
+        tracker = Tracker(
+            max_missing=4,
+            max_distance=130
+        )
+
+        frames = [
+            [("A", 90, 70), ("B", 145, 75)],
+            [("B", 145, 95), ("A", 90, 90)],
+            [("A", 90, 110), ("B", 145, 115)],
+            [("B", 145, 135), ("A", 90, 130)],
+            [("A", 90, 150), ("B", 145, 155)],
+        ]
+
+        expected_ids = {}
+
+        for frame_index, frame in enumerate(frames):
+            output = tracker.update([
+                labeled_person(
+                    center_x,
+                    center_y,
+                    label
+                )
+                for label, center_x, center_y in frame
+            ])
+            current = {
+                item["label"]: item["id"]
+                for item in output
+            }
+
+            if frame_index == 0:
+                expected_ids = current
+                continue
+
+            self.assertEqual(
+                current.get("A"),
+                expected_ids["A"]
+            )
+            self.assertEqual(
+                current.get("B"),
+                expected_ids["B"]
+            )
+            self.assertNotEqual(
+                current.get("A"),
+                current.get("B")
+            )
+
     def test_merged_detection_between_opposite_tracks_is_suppressed(self):
         tracker = Tracker(
             max_missing=4,
