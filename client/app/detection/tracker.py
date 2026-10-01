@@ -494,7 +494,7 @@ class Tracker:
         DP por mascara es rapido y evita ese problema.
         """
         if not self.tracks or not detections:
-            return {}
+            return {}, set()
 
         track_ids = list(self.tracks.keys())
         detection_count = len(detections)
@@ -522,6 +522,8 @@ class Tracker:
                 and self.tracks[track_id]["missing"] <= 1
             )
         ]
+
+        suppressed_detections = set()
 
         if detection_count < len(recent_tracks):
             for detection_index in range(detection_count):
@@ -554,6 +556,9 @@ class Tracker:
                 if cosine < -0.35:
                     costs[first_index][detection_index] = None
                     costs[second_index][detection_index] = None
+                    suppressed_detections.add(
+                        detection_index
+                    )
 
         new_track_penalty = 120.0
 
@@ -607,10 +612,13 @@ class Tracker:
 
         _, pairs = solve(0, 0)
 
-        return {
-            detection_index: track_id
-            for track_id, detection_index in pairs
-        }
+        return (
+            {
+                detection_index: track_id
+                for track_id, detection_index in pairs
+            },
+            suppressed_detections
+        )
 
     def update(self, detections):
         """
@@ -628,7 +636,10 @@ class Tracker:
             self._remove_expired()
             return []
 
-        assignments = self._assign_detections(
+        (
+            assignments,
+            suppressed_detections
+        ) = self._assign_detections(
             detections
         )
 
@@ -638,6 +649,9 @@ class Tracker:
             detection_index,
             detection
         ) in enumerate(detections):
+            if detection_index in suppressed_detections:
+                continue
+
             track_id = assignments.get(
                 detection_index
             )
