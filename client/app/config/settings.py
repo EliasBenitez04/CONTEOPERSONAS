@@ -91,7 +91,7 @@ class Settings:
     TRAY_MODE = _env_bool("TRAY_MODE", True)
 
     # Vista abierta: conserva suficiente fluidez para calibrar y diagnosticar.
-    PROCESS_FPS = _env_float("PROCESS_FPS", 12.0, minimum=1.0)
+    PROCESS_FPS = _env_float("PROCESS_FPS", 15.0, minimum=1.0)
 
     # Perfil de produccion oculto. El valor base puede subir hasta 12 FPS,
     # mientras el motion gate evita inferencias continuas con la puerta quieta.
@@ -122,12 +122,11 @@ class Settings:
         )
     )
 
-    # Se respeta el .env para poder ajustar cada PC. Un hilo sigue siendo el
-    # valor seguro por defecto; equipos de escritorio pueden usar 2 sin tocar
-    # el codigo.
+    # Se respeta el .env para ajustar cada PC. Dos hilos son el perfil base
+    # de escritorio; puede bajarse a 1 en equipos antiguos o subir hasta 4.
     YOLO_CPU_THREADS = min(
         4,
-        _env_int("YOLO_CPU_THREADS", 1, minimum=1)
+        _env_int("YOLO_CPU_THREADS", 2, minimum=1)
     )
 
     MANAGED_CLIENT = bool(CLIENT_ID and CLIENT_TOKEN)
