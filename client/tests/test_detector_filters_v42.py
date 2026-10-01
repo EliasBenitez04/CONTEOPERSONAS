@@ -77,13 +77,52 @@ class DetectorFilterV42Tests(unittest.TestCase):
             by_id[2]["countable"]
         )
 
+    def test_smaller_adult_same_direction_is_not_carried(self):
+        far_adult = person(
+            1,
+            460,
+            300,
+            610,
+            620,
+            (0.0, 10.0)
+        )
+        near_adult = person(
+            2,
+            400,
+            250,
+            700,
+            750,
+            (0.0, 12.0)
+        )
+
+        result = self.detector._classify_countable(
+            [
+                far_adult,
+                near_adult
+            ],
+            1080
+        )
+
+        by_id = {
+            item["id"]: item
+            for item in result
+        }
+
+        self.assertTrue(
+            by_id[1]["countable"]
+        )
+        self.assertEqual(
+            by_id[1]["count_filter"],
+            "ADULT"
+        )
+
     def test_contained_person_moving_with_adult_can_be_filtered(self):
         carried = person(
             1,
-            480,
-            300,
-            580,
-            580,
+            485,
+            350,
+            575,
+            540,
             (0.0, 10.0)
         )
         adult = person(
