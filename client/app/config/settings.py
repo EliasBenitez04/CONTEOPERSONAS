@@ -57,7 +57,7 @@ def _env_float(name: str, default: float, minimum=None) -> float:
 
 
 class Settings:
-    APP_VERSION = "4.1.2"
+    APP_VERSION = "4.2.0"
 
     CAMERA_NAME = os.getenv("CAMERA_NAME", "CAMARA_01")
     CAMERA_RTSP_URL = os.getenv("CAMERA_RTSP_URL", "")
@@ -97,10 +97,20 @@ class Settings:
     # el paso de un pie sobre la linea. Se permite hasta 8 FPS, pero el motion
     # gate evita inferencias YOLO continuas cuando la zona esta quieta.
     BACKGROUND_PROCESS_FPS = min(
-        8.0,
+        12.0,
         max(
             5.0,
-            _env_float("BACKGROUND_PROCESS_FPS", 6.0, minimum=1.0)
+            _env_float("BACKGROUND_PROCESS_FPS", 8.0, minimum=1.0)
+        )
+    )
+
+    # Cuando hay movimiento/personas cerca del trazado, el cliente aumenta
+    # temporalmente la frecuencia para preservar IDs en cruces simultaneos.
+    CROSSING_PROCESS_FPS = min(
+        15.0,
+        max(
+            BACKGROUND_PROCESS_FPS,
+            _env_float("CROSSING_PROCESS_FPS", 12.0, minimum=1.0)
         )
     )
 
