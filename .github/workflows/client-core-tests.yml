@@ -20,7 +20,7 @@ jobs:
           python-version: "3.12"
 
       - name: Compile client
-        run: python -m compileall -q client/app client/tests
+        run: python -m compileall -q client/app client/tests server/app
 
       - name: Counter and tracker tests
         working-directory: client
