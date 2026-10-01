@@ -1,4 +1,5 @@
 import math
+from functools import lru_cache
 
 
 class Tracker:
@@ -320,6 +321,25 @@ class Tracker:
             - predicted_point[1]
         )
 
+        detected_movement = (
+            self._detection_movement_point(
+                detection,
+                (dcx, dcy)
+            )
+        )
+        predicted_movement = (
+            track["movement_point"][0]
+            + track["vx"],
+            track["movement_point"][1]
+            + track["vy"]
+        )
+        movement_anchor_distance = math.hypot(
+            detected_movement[0]
+            - predicted_movement[0],
+            detected_movement[1]
+            - predicted_movement[1]
+        )
+
         diagonal = max(
             math.hypot(
                 width,
@@ -389,8 +409,8 @@ class Tracker:
         direction_penalty = 0.0
 
         if (
-            predicted_speed > 4.0
-            and measured_speed > 4.0
+            predicted_speed > 3.0
+            and measured_speed > 3.0
         ):
             dot = (
                 track["vx"] * motion_x
@@ -399,18 +419,31 @@ class Tracker:
                 predicted_speed
                 * measured_speed
             )
+            dot = max(-1.0, min(1.0, dot))
 
-            if dot < 0:
-                direction_penalty = min(
-                    55.0,
-                    abs(dot) * 55.0
-                )
+            # En cruces simultaneos el IoU puede favorecer al bbox equivocado.
+            # La direccion historica pesa fuerte para no intercambiar IDs.
+            if dot < 0.55:
+                direction_penalty = (
+                    0.55 - dot
+                ) * 95.0
+
+            if (
+                track["hits"] >= 3
+                and track["missing"] <= 1
+                and dot < -0.60
+            ):
+                direction_penalty += 45.0
 
         if (
             distance > dynamic_distance
             and (
                 anchor_distance
                 > dynamic_distance * 1.20
+            )
+            and (
+                movement_anchor_distance
+                > dynamic_distance * 1.35
             )
             and iou < 0.025
         ):
@@ -426,11 +459,158 @@ class Tracker:
         return (
             distance
             + anchor_distance * 0.18
+            + movement_anchor_distance * 0.10
             - iou * 155.0
             + size_delta * 45.0
             + direction_penalty
             + stale_penalty
         )
+
+    @staticmethod
+    def _velocity_cosine(track_a, track_b):
+        speed_a = math.hypot(
+            track_a["vx"],
+            track_a["vy"]
+        )
+        speed_b = math.hypot(
+            track_b["vx"],
+            track_b["vy"]
+        )
+
+        if speed_a < 2.0 or speed_b < 2.0:
+            return 1.0
+
+        return (
+            track_a["vx"] * track_b["vx"]
+            + track_a["vy"] * track_b["vy"]
+        ) / (speed_a * speed_b)
+
+    def _assign_detections(self, detections):
+        """
+        Asignacion global de costo minimo.
+
+        El greedy anterior podia tomar primero una pareja localmente barata y
+        dejar la segunda persona con un ID incorrecto. Con max_det pequeno,
+        DP por mascara es rapido y evita ese problema.
+        """
+        if not self.tracks or not detections:
+            return {}
+
+        track_ids = list(self.tracks.keys())
+        detection_count = len(detections)
+
+        costs = []
+        for track_id in track_ids:
+            track = self.tracks[track_id]
+            row = []
+            for detection in detections:
+                row.append(
+                    self._candidate_cost(
+                        track,
+                        detection
+                    )
+                )
+            costs.append(row)
+
+        # Si YOLO fusiona temporalmente dos personas que venian en sentidos
+        # opuestos en una sola deteccion, no contaminamos ninguno de los IDs.
+        recent_tracks = [
+            index
+            for index, track_id in enumerate(track_ids)
+            if (
+                self.tracks[track_id]["hits"] >= 3
+                and self.tracks[track_id]["missing"] <= 1
+            )
+        ]
+
+        if detection_count < len(recent_tracks):
+            for detection_index in range(detection_count):
+                candidates = [
+                    (
+                        costs[track_index][detection_index],
+                        track_index
+                    )
+                    for track_index in recent_tracks
+                    if costs[track_index][detection_index] is not None
+                ]
+                candidates.sort(
+                    key=lambda item: item[0]
+                )
+
+                if len(candidates) < 2:
+                    continue
+
+                first_cost, first_index = candidates[0]
+                second_cost, second_index = candidates[1]
+
+                if abs(first_cost - second_cost) > 18.0:
+                    continue
+
+                cosine = self._velocity_cosine(
+                    self.tracks[track_ids[first_index]],
+                    self.tracks[track_ids[second_index]]
+                )
+
+                if cosine < -0.35:
+                    costs[first_index][detection_index] = None
+                    costs[second_index][detection_index] = None
+
+        new_track_penalty = 120.0
+
+        @lru_cache(maxsize=None)
+        def solve(track_index, used_mask):
+            if track_index >= len(track_ids):
+                unmatched = (
+                    detection_count
+                    - used_mask.bit_count()
+                )
+                return (
+                    unmatched * new_track_penalty,
+                    ()
+                )
+
+            best_cost, best_pairs = solve(
+                track_index + 1,
+                used_mask
+            )
+
+            for detection_index in range(detection_count):
+                if used_mask & (1 << detection_index):
+                    continue
+
+                candidate_cost = costs[
+                    track_index
+                ][detection_index]
+
+                if candidate_cost is None:
+                    continue
+
+                next_cost, next_pairs = solve(
+                    track_index + 1,
+                    used_mask | (1 << detection_index)
+                )
+                total_cost = (
+                    candidate_cost
+                    + next_cost
+                )
+
+                if total_cost < best_cost:
+                    best_cost = total_cost
+                    best_pairs = (
+                        (
+                            track_ids[track_index],
+                            detection_index
+                        ),
+                    ) + next_pairs
+
+            return best_cost, best_pairs
+
+        _, pairs = solve(0, 0)
+
+        return {
+            detection_index: track_id
+            for track_id, detection_index in pairs
+        }
 
     def update(self, detections):
         """
@@ -448,55 +628,9 @@ class Tracker:
             self._remove_expired()
             return []
 
-        candidates = []
-
-        for track_id, track in self.tracks.items():
-            for (
-                detection_index,
-                detection
-            ) in enumerate(detections):
-                cost = self._candidate_cost(
-                    track,
-                    detection
-                )
-
-                if cost is None:
-                    continue
-
-                candidates.append((
-                    cost,
-                    track_id,
-                    detection_index
-                ))
-
-        candidates.sort(
-            key=lambda item: item[0]
+        assignments = self._assign_detections(
+            detections
         )
-
-        used_tracks = set()
-        used_detections = set()
-        assignments = {}
-
-        for (
-            _,
-            track_id,
-            detection_index
-        ) in candidates:
-            if (
-                track_id in used_tracks
-                or detection_index
-                in used_detections
-            ):
-                continue
-
-            used_tracks.add(track_id)
-            used_detections.add(
-                detection_index
-            )
-
-            assignments[
-                detection_index
-            ] = track_id
 
         output = []
 
@@ -580,6 +714,13 @@ class Tracker:
 
             item["max_displacement"] = float(
                 track["max_displacement"]
+            )
+            item["velocity"] = (
+                float(track["vx"]),
+                float(track["vy"])
+            )
+            item["missing"] = int(
+                track["missing"]
             )
 
             output.append(item)
