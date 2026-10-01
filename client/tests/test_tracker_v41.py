@@ -153,6 +153,35 @@ class TrackerV41Tests(unittest.TestCase):
         )
 
 
+    def test_production_tracker_recovers_id_after_longer_occlusion(self):
+        tracker = Tracker(
+            max_missing=18,
+            max_distance=165
+        )
+
+        first = tracker.update([
+            labeled_person(100, 80, "A")
+        ])[0]["id"]
+
+        tracker.update([
+            labeled_person(100, 95, "A")
+        ])
+        tracker.update([
+            labeled_person(100, 110, "A")
+        ])
+
+        for _ in range(8):
+            tracker.update([])
+
+        recovered = tracker.update([
+            labeled_person(102, 150, "A")
+        ])[0]["id"]
+
+        self.assertEqual(
+            recovered,
+            first
+        )
+
     def test_two_people_opposite_directions_keep_ids(self):
         tracker = Tracker(
             max_missing=4,
