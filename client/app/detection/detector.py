@@ -345,6 +345,31 @@ class PersonDetector:
         iy2 = min(a["y2"], b["y2"])
         return max(0, ix2 - ix1) * max(0, iy2 - iy1)
 
+    @staticmethod
+    def _velocity_cosine(person_a, person_b):
+        velocity_a = person_a.get("velocity") or (0.0, 0.0)
+        velocity_b = person_b.get("velocity") or (0.0, 0.0)
+
+        ax = float(velocity_a[0])
+        ay = float(velocity_a[1])
+        bx = float(velocity_b[0])
+        by = float(velocity_b[1])
+
+        speed_a = (ax * ax + ay * ay) ** 0.5
+        speed_b = (bx * bx + by * by) ** 0.5
+
+        if speed_a < 2.0 or speed_b < 2.0:
+            return None
+
+        return max(
+            -1.0,
+            min(
+                1.0,
+                (ax * bx + ay * by)
+                / (speed_a * speed_b)
+            )
+        )
+
     def _classify_countable(self, persons, frame_height):
         """
         Filtro conservador de conteo.
@@ -407,25 +432,60 @@ class PersonDetector:
                 person["countable"] = False
                 person["count_filter"] = "UNCONFIRMED_STATIC"
 
-        # Bebe/persona pequena cargada: bbox mayormente contenido y sin llegar
-        # al mismo nivel de piso que el adulto. No afecta al adulto portador.
+        # Bebe/persona cargada. Se exige una diferencia corporal fuerte y,
+        # si ambos tracks ya tienen velocidad, que se muevan en la misma
+        # direccion. Esto evita filtrar un adulto que cruza detras de otro.
         for small in persons:
+            small_width = max(
+                1,
+                small["x2"] - small["x1"]
+            )
+            small_height = max(
+                1,
+                small["y2"] - small["y1"]
+            )
             small_area = max(
                 1,
-                (small["x2"] - small["x1"])
-                * (small["y2"] - small["y1"])
+                small_width * small_height
+            )
+            small_center_y = (
+                small["y1"]
+                + small_height * 0.5
             )
 
             for large in persons:
                 if small["id"] == large["id"]:
                     continue
 
+                large_width = max(
+                    1,
+                    large["x2"] - large["x1"]
+                )
+                large_height = max(
+                    1,
+                    large["y2"] - large["y1"]
+                )
                 large_area = max(
                     1,
-                    (large["x2"] - large["x1"])
-                    * (large["y2"] - large["y1"])
+                    large_width * large_height
                 )
-                if large_area <= small_area * 1.55:
+
+                height_ratio = (
+                    small_height
+                    / float(large_height)
+                )
+                width_ratio = (
+                    small_width
+                    / float(large_width)
+                )
+
+                # Un adulto en perspectiva puede ser algo menor; un cargado
+                # debe ser claramente mas pequeno en ambas dimensiones.
+                if (
+                    height_ratio > 0.62
+                    or width_ratio > 0.78
+                    or large_area <= small_area * 1.85
+                ):
                     continue
 
                 overlap = (
@@ -439,17 +499,39 @@ class PersonDetector:
                     large["y2"]
                     - small["y2"]
                 )
+                upper_body_limit = (
+                    large["y1"]
+                    + large_height * 0.72
+                )
 
                 if (
-                    overlap >= 0.72
-                    and floor_gap >= max(
-                        35,
-                        int(frame_height * 0.045)
+                    overlap < 0.80
+                    or floor_gap < max(
+                        45,
+                        int(frame_height * 0.055)
                     )
+                    or small_center_y > upper_body_limit
                 ):
-                    small["countable"] = False
-                    small["count_filter"] = "CARRIED_PERSON"
-                    break
+                    continue
+
+                velocity_cosine = (
+                    self._velocity_cosine(
+                        small,
+                        large
+                    )
+                )
+
+                # Dos adultos moviendose en sentidos opuestos nunca pueden
+                # clasificarse como persona cargada.
+                if (
+                    velocity_cosine is not None
+                    and velocity_cosine < 0.35
+                ):
+                    continue
+
+                small["countable"] = False
+                small["count_filter"] = "CARRIED_PERSON"
+                break
 
         return persons
 
