@@ -461,6 +461,11 @@ class PersonDetector:
         # si ambos tracks ya tienen velocidad, que se muevan en la misma
         # direccion. Esto evita filtrar un adulto que cruza detras de otro.
         for small in persons:
+            # Nunca degradar a un adulto ya validado por perspectiva.
+            # CARRIED_PERSON solo refina detecciones que ya eran pequenas.
+            if small.get("count_filter") != "SMALL_PERSON":
+                continue
+
             small_width = max(
                 1,
                 small["x2"] - small["x1"]
