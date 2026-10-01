@@ -127,7 +127,13 @@ class APIClient:
             "line_y2": int(points[-1][1]),
             "line_points": points,
             "in_side": 1 if int(local_config.get("in_side", 1)) >= 0 else -1,
-            "margin": max(1, int(local_config.get("margin", 18))),
+            "margin": max(
+                6,
+                min(
+                    60,
+                    int(local_config.get("margin", 18))
+                )
+            ),
             "confidence": min(99, max(1, int(round(confidence * 100))))
         }
 
