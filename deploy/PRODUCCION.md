@@ -1,4 +1,4 @@
-# SISTEMA CAMARA - Produccion V4.1.2 / Protocolo V3
+# SISTEMA CAMARA - Produccion V4.2.0 / Protocolo V3
 
 ## Servidor central
 
