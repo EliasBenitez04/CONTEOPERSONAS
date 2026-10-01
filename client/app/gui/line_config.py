@@ -391,8 +391,34 @@ class LineConfigurator:
                 margin=self.config.get("margin", 18)
             )
 
-            # Franja externa: distancia efectiva para confirmar el destino.
-            corridor = canvas.copy()
+            # Franja exterior: hasta aqui debe RECORRER el torso despues del
+            # cruce antes de que el evento pueda confirmarse.
+            completion = canvas.copy()
+            completion_width = max(
+                12,
+                int(round(preview_counter.completion_margin * 2.0))
+            )
+
+            for index in range(1, len(self.points)):
+                cv2.line(
+                    completion,
+                    self.points[index - 1],
+                    self.points[index],
+                    (155, 155, 155),
+                    completion_width
+                )
+
+            cv2.addWeighted(
+                completion,
+                0.16,
+                canvas,
+                0.84,
+                0,
+                canvas
+            )
+
+            # Franja intermedia: lado ya confirmado, pero todavia no cuenta.
+            confirm = canvas.copy()
             confirm_width = max(
                 10,
                 int(round(preview_counter.confirm_margin * 2.0))
@@ -400,18 +426,18 @@ class LineConfigurator:
 
             for index in range(1, len(self.points)):
                 cv2.line(
-                    corridor,
+                    confirm,
                     self.points[index - 1],
                     self.points[index],
-                    (120, 120, 120),
+                    (90, 90, 90),
                     confirm_width
                 )
 
             cv2.addWeighted(
-                corridor,
-                0.24,
+                confirm,
+                0.22,
                 canvas,
-                0.76,
+                0.78,
                 0,
                 canvas
             )
@@ -521,9 +547,10 @@ class LineConfigurator:
 
         if preview_counter is not None:
             margin_text = (
-                f"Margen: {margin_value}px | "
-                f"Neutral +/-{preview_counter.crossing_margin:.1f}px | "
-                f"Confirmar +/-{preview_counter.confirm_margin:.1f}px"
+                f"Margen {margin_value}px | "
+                f"Neutral {preview_counter.crossing_margin:.0f}px | "
+                f"Confirmar {preview_counter.confirm_margin:.0f}px | "
+                f"CONTAR {preview_counter.completion_margin:.0f}px"
             )
         else:
             margin_text = f"Margen: {margin_value}px"
@@ -553,7 +580,7 @@ class LineConfigurator:
 
         cv2.putText(
             canvas,
-            "Gris = confirmacion | centro oscuro = zona neutral",
+            "Gris claro = recorrido para contar | oscuro = neutral/confirmacion",
             (25, 262),
             cv2.FONT_HERSHEY_SIMPLEX,
             0.50,
