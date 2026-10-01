@@ -55,6 +55,7 @@ class PersonDetector:
             max_distance=150
         )
         self.counting_points = []
+        self.motion_gate_enabled = True
 
         # Motion gate exclusivo del perfil liviano. Cuando aparece movimiento
         # o una persona, mantenemos una ventana activa para que el tracker vea
@@ -163,7 +164,10 @@ class PersonDetector:
         return frame[y1:y2, x1:x2]
 
     def _background_motion_detected(self, frame):
-        if self.cuda_enabled or self.imgsz > 416:
+        if (
+            not self.motion_gate_enabled
+            or self.cuda_enabled
+        ):
             return True
 
         now = time.monotonic()
@@ -216,6 +220,21 @@ class PersonDetector:
         return (
             now - self._last_inference_at
             >= self._idle_refresh_seconds
+        )
+
+    def set_motion_gate_enabled(self, enabled):
+        value = bool(enabled)
+
+        if value == self.motion_gate_enabled:
+            return
+
+        self.motion_gate_enabled = value
+        self._motion_previous = None
+        self._activity_until = 0.0
+
+        print(
+            "[YOLO] Motion gate: "
+            f"{'ACTIVO' if value else 'DESACTIVADO'}"
         )
 
     def has_recent_activity(self):
