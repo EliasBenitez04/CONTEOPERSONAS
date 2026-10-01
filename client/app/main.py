@@ -451,6 +451,7 @@ def main():
                     )
                     camera.set_max_fps(settings.PROCESS_FPS)
                     detector.set_imgsz(settings.YOLO_IMGSZ)
+                    detector.set_motion_gate_enabled(False)
                     print("[RENDIMIENTO] Perfil visual activo.")
                 else:
                     camera.set_max_fps(settings.BACKGROUND_PROCESS_FPS)
@@ -460,6 +461,7 @@ def main():
                             settings.BACKGROUND_YOLO_IMGSZ
                         )
                     )
+                    detector.set_motion_gate_enabled(True)
                     print(
                         "[RENDIMIENTO] Perfil liviano de segundo plano activo."
                     )
