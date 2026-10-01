@@ -554,8 +554,9 @@ class Tracker:
                 )
 
                 if cosine < -0.35:
-                    costs[first_index][detection_index] = None
-                    costs[second_index][detection_index] = None
+                    for row_index in range(len(costs)):
+                        costs[row_index][detection_index] = None
+
                     suppressed_detections.add(
                         detection_index
                     )
