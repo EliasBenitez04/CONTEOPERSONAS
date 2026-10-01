@@ -263,6 +263,10 @@ def print_client_diagnostics():
         f"{settings.BACKGROUND_YOLO_IMGSZ}px"
     )
     print(
+        "[CLIENT] Boost automatico durante cruces: "
+        f"{settings.CROSSING_PROCESS_FPS:g} FPS"
+    )
+    print(
         "[CLIENT] Inferencia optimizada: hasta 512 px visible y "
         "384-480 px en segundo plano."
     )
@@ -404,6 +408,7 @@ def main():
     window_hidden = False
     restore_pending = False
     performance_mode = None
+    crossing_boost_active = False
 
     if not settings.HEADLESS and settings.TRAY_MODE:
         tray = TrayController(WINDOW_TITLE)
@@ -501,6 +506,37 @@ def main():
                 )
 
             persons = detector.track(frame)
+
+            # En produccion oculta se conserva un perfil base liviano, pero
+            # durante movimiento real se suben temporalmente los FPS del RTSP.
+            # El detector sigue usando el ultimo frame disponible, sin cola.
+            if not render_view:
+                should_boost = detector.has_recent_activity()
+
+                if should_boost != crossing_boost_active:
+                    target_fps = (
+                        settings.CROSSING_PROCESS_FPS
+                        if should_boost
+                        else settings.BACKGROUND_PROCESS_FPS
+                    )
+                    camera.set_max_fps(
+                        target_fps,
+                        announce=False
+                    )
+                    crossing_boost_active = should_boost
+
+                    if should_boost:
+                        print(
+                            "[RENDIMIENTO] Boost de cruce activo: "
+                            f"{target_fps:g} FPS."
+                        )
+                    else:
+                        print(
+                            "[RENDIMIENTO] Boost finalizado; "
+                            f"vuelve a {target_fps:g} FPS."
+                        )
+            elif crossing_boost_active:
+                crossing_boost_active = False
 
             if render_view:
                 draw_counting_path(
