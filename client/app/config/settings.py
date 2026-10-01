@@ -114,12 +114,12 @@ class Settings:
         )
     )
 
-    YOLO_IMGSZ = _env_int("YOLO_IMGSZ", 640, minimum=320)
+    YOLO_IMGSZ = _env_int("YOLO_IMGSZ", 512, minimum=320)
     BACKGROUND_YOLO_IMGSZ = min(
         480,
         max(
             384,
-            _env_int("BACKGROUND_YOLO_IMGSZ", 416, minimum=320)
+            _env_int("BACKGROUND_YOLO_IMGSZ", 480, minimum=320)
         )
     )
 
