@@ -561,7 +561,7 @@ class Tracker:
                         detection_index
                     )
 
-        new_track_penalty = 120.0
+        new_track_penalty = 150.0
 
         @lru_cache(maxsize=None)
         def solve(track_index, used_mask):
@@ -575,10 +575,28 @@ class Tracker:
                     ()
                 )
 
-            best_cost, best_pairs = solve(
+            track_id = track_ids[track_index]
+            track = self.tracks[track_id]
+
+            if (
+                track["hits"] >= 3
+                and track["missing"] <= 2
+            ):
+                miss_penalty = 70.0
+            elif track["missing"] <= 5:
+                miss_penalty = 35.0
+            else:
+                miss_penalty = 8.0
+
+            skipped_cost, skipped_pairs = solve(
                 track_index + 1,
                 used_mask
             )
+            best_cost = (
+                miss_penalty
+                + skipped_cost
+            )
+            best_pairs = skipped_pairs
 
             for detection_index in range(detection_count):
                 if used_mask & (1 << detection_index):
