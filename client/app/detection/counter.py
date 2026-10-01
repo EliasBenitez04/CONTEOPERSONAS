@@ -35,11 +35,11 @@ class LineCounter:
         self.exits = 0
         self.states = {}
 
-        self.stable_frames = 2
-        self.destination_frames = 2
+        self.stable_frames = 3
+        self.destination_frames = 3
         self.rearm_frames = 3
         self.max_step = 260.0
-        self.crossing_timeout_seconds = 3.0
+        self.crossing_timeout_seconds = 4.0
 
         self.set_margin(margin)
 
@@ -117,22 +117,32 @@ class LineCounter:
             )
         )
 
-        # Despues de contar, debe alejarse aun mas antes de rearmar el ID.
-        self.rearm_margin = max(
-            self.confirm_margin + 7.0,
+        # Distancia POST-CRUCE. Tocar/cruzar la linea no alcanza:
+        # el torso debe alejarse claramente hacia el destino antes de contar.
+        self.completion_margin = max(
+            self.confirm_margin + 12.0,
             min(
-                56.0,
-                self._margin * 1.55
+                64.0,
+                self._margin * 2.0
             )
         )
 
-        # Movimiento minimo REAL del punto inferior desde el instante del
-        # cruce. Con margin=18 exige ~20 px de locomocion perpendicular.
+        # Movimiento minimo REAL del punto inferior DESPUES del cruce.
+        # Con margin=18 exige ~32 px de locomocion perpendicular.
         self.movement_confirm_distance = max(
-            18.0,
+            28.0,
             min(
-                36.0,
-                self._margin * 1.10
+                56.0,
+                self._margin * 1.80
+            )
+        )
+
+        # Despues de contar, debe alejarse aun mas antes de rearmar el ID.
+        self.rearm_margin = max(
+            self.completion_margin + 10.0,
+            min(
+                78.0,
+                self._margin * 2.40
             )
         )
 
@@ -678,12 +688,15 @@ class LineCounter:
         )
 
         # Solo suma frames de destino cuando:
-        # 1) torso termino claramente del otro lado;
-        # 2) el punto inferior se desplazo realmente hacia ese mismo lado.
+        # 1) el torso ya recorrio una distancia POST-CRUCE suficiente;
+        # 2) el punto inferior tambien demostro locomocion real;
+        # 3) esto se mantiene varios frames consecutivos.
+        #
+        # Importante: cruzar/tocar la linea NO genera el evento.
         if (
             segment_side == destination
             and abs(segment_distance)
-            >= self.confirm_margin
+            >= self.completion_margin
             and movement_progress
             >= self.movement_confirm_distance
         ):
