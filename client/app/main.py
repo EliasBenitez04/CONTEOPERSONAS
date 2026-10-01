@@ -96,28 +96,52 @@ def draw_direction_labels(frame, counter, points):
 
 
 def draw_counting_path(frame, counter, points):
-    # El trazado visible representa el CENTRO de un corredor. La franja gris
-    # muestra la distancia que debe atravesar el torso antes de confirmar.
-    overlay = frame.copy()
-    corridor_thickness = max(
+    # El trazado magenta es SOLO el centro. La franja exterior representa la
+    # distancia post-cruce que debe alcanzar el torso antes de poder contar.
+    completion = frame.copy()
+    completion_thickness = max(
+        12,
+        int(round(counter.completion_margin * 2.0))
+    )
+
+    for index in range(len(points) - 1):
+        cv2.line(
+            completion,
+            points[index],
+            points[index + 1],
+            (155, 155, 155),
+            completion_thickness
+        )
+
+    cv2.addWeighted(
+        completion,
+        0.16,
+        frame,
+        0.84,
+        0,
+        frame
+    )
+
+    confirm = frame.copy()
+    confirm_thickness = max(
         10,
         int(round(counter.confirm_margin * 2.0))
     )
 
     for index in range(len(points) - 1):
         cv2.line(
-            overlay,
+            confirm,
             points[index],
             points[index + 1],
-            (120, 120, 120),
-            corridor_thickness
+            (90, 90, 90),
+            confirm_thickness
         )
 
     cv2.addWeighted(
-        overlay,
-        0.24,
+        confirm,
+        0.22,
         frame,
-        0.76,
+        0.78,
         0,
         frame
     )
