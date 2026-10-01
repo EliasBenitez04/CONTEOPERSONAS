@@ -26,4 +26,4 @@ jobs:
         working-directory: client
         env:
           PYTHONPATH: .
-        run: python -m unittest tests.test_counter_v4 tests.test_tracker_v41
+        run: python -m unittest tests.test_counter_v4 tests.test_tracker_v41 tests.test_detector_filters_v42
