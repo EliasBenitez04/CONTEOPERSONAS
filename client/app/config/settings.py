@@ -93,9 +93,8 @@ class Settings:
     # Vista abierta: conserva suficiente fluidez para calibrar y diagnosticar.
     PROCESS_FPS = _env_float("PROCESS_FPS", 12.0, minimum=1.0)
 
-    # Perfil de produccion oculto. Menos de 5 FPS puede saltarse por completo
-    # el paso de un pie sobre la linea. Se permite hasta 8 FPS, pero el motion
-    # gate evita inferencias YOLO continuas cuando la zona esta quieta.
+    # Perfil de produccion oculto. El valor base puede subir hasta 12 FPS,
+    # mientras el motion gate evita inferencias continuas con la puerta quieta.
     BACKGROUND_PROCESS_FPS = min(
         12.0,
         max(
