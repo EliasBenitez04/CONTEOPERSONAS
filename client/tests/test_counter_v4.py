@@ -213,6 +213,64 @@ class LineCounterV41Tests(unittest.TestCase):
 
         self.assertEqual(events, ["OUT"])
 
+    def test_two_simultaneous_entries_count_twice(self):
+        counter = self.make_counter()
+
+        frames = [
+            (
+                ((90, 65), (90, 170)),
+                ((150, 68), (150, 173))
+            ),
+            (
+                ((90, 70), (90, 175)),
+                ((150, 73), (150, 178))
+            ),
+            (
+                ((90, 88), (90, 185)),
+                ((150, 91), (150, 188))
+            ),
+            (
+                ((90, 104), (90, 198)),
+                ((150, 107), (150, 201))
+            ),
+            (
+                ((90, 122), (90, 215)),
+                ((150, 125), (150, 218))
+            ),
+            (
+                ((90, 128), (90, 225)),
+                ((150, 131), (150, 228))
+            ),
+        ]
+
+        events = []
+
+        for first, second in frames:
+            for track_id, sample in (
+                (301, first),
+                (302, second)
+            ):
+                event = counter.update(
+                    track_id,
+                    sample[0],
+                    sample[1]
+                )
+                if event:
+                    events.append(event)
+
+        self.assertEqual(
+            counter.entries,
+            2
+        )
+        self.assertEqual(
+            counter.exits,
+            0
+        )
+        self.assertEqual(
+            events,
+            ["IN", "IN"]
+        )
+
     def test_simultaneous_in_and_out_are_independent(self):
         counter = self.make_counter()
 
