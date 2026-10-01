@@ -4,7 +4,7 @@ import time
 
 class LineCounter:
     """
-    Contador V4.1.1: cruce por torso + validacion de locomocion.
+    Contador V4.2.0: cruce por torso + validacion de locomocion.
 
     El torso decide si hubo cruce geometrico de la polilinea, pero un evento
     solo se confirma si el punto inferior (apoyo/pies) tambien demuestra
