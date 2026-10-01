@@ -213,6 +213,68 @@ class LineCounterV41Tests(unittest.TestCase):
 
         self.assertEqual(events, ["OUT"])
 
+    def test_simultaneous_in_and_out_are_independent(self):
+        counter = self.make_counter()
+
+        frames = [
+            (
+                ((100, 65), (100, 170)),
+                ((130, 135), (130, 225))
+            ),
+            (
+                ((100, 70), (100, 175)),
+                ((130, 130), (130, 220))
+            ),
+            (
+                ((100, 88), (100, 185)),
+                ((130, 112), (130, 210))
+            ),
+            (
+                ((100, 104), (100, 198)),
+                ((130, 98), (130, 195))
+            ),
+            (
+                ((100, 122), (100, 215)),
+                ((130, 80), (130, 178))
+            ),
+            (
+                ((100, 128), (100, 225)),
+                ((130, 72), (130, 168))
+            ),
+        ]
+
+        events = []
+
+        for in_sample, out_sample in frames:
+            event_in = counter.update(
+                101,
+                in_sample[0],
+                in_sample[1]
+            )
+            if event_in:
+                events.append(event_in)
+
+            event_out = counter.update(
+                202,
+                out_sample[0],
+                out_sample[1]
+            )
+            if event_out:
+                events.append(event_out)
+
+        self.assertEqual(
+            counter.entries,
+            1
+        )
+        self.assertEqual(
+            counter.exits,
+            1
+        )
+        self.assertEqual(
+            sorted(events),
+            ["IN", "OUT"]
+        )
+
     def test_crossing_outside_segment_does_not_count(self):
         counter = self.make_counter()
         events = self.feed(
