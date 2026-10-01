@@ -204,7 +204,13 @@ def normalize_remote_config(remote, fallback_config=None):
         {
             "line": remote_line,
             "in_side": 1 if int(remote.get("in_side", 1)) >= 0 else -1,
-            "margin": max(1, int(remote.get("margin", 18))),
+            "margin": max(
+                6,
+                min(
+                    60,
+                    int(remote.get("margin", 18))
+                )
+            ),
             "confidence": float(remote.get("confidence", 0.22)),
             "config_version": int(remote.get("config_version", 0))
         }
