@@ -40,7 +40,7 @@ class CountEvent:
                 datetime.now()
                 .astimezone()
                 .isoformat(
-                    timespec="seconds"
+                    timespec="milliseconds"
                 )
             ),
             synchronized=0
