@@ -495,6 +495,10 @@ def main():
                 detector.set_confidence(config["confidence"])
                 detector.reset_tracker()
 
+                # Asegura que eventos disparados justo antes del cambio remoto
+                # ya esten en SQLite antes de recalcular los totales visibles.
+                event_writer.flush()
+
                 updated_totals = database.get_today_totals(
                     branch_id=runtime_branch_id,
                     camera_name=runtime_camera_name
