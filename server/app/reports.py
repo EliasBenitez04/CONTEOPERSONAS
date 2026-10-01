@@ -224,7 +224,7 @@ def reports_data(
         detail_events.append({
             "id": event.id,
             "date": local_event.date().isoformat(),
-            "time": local_event.strftime("%H:%M:%S"),
+            "time": local_event.strftime("%H:%M:%S.%f")[:-3],
             "branch_id": event.branch_id,
             "branch_name": event.branch.name,
             "camera_id": event.camera_id,
@@ -306,7 +306,7 @@ def export_reports_csv(
         writer.writerow([
             event.id,
             local_event.strftime("%d/%m/%Y"),
-            local_event.strftime("%H:%M:%S"),
+            local_event.strftime("%H:%M:%S.%f")[:-3],
             event.branch.name,
             event.camera.name,
             event.event_type,
