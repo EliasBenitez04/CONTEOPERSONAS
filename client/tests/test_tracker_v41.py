@@ -26,6 +26,36 @@ def detection(
     }
 
 
+def labeled_person(
+    center_x,
+    center_y,
+    label,
+    width=50,
+    height=120
+):
+    x1 = center_x - width // 2
+    y1 = center_y - height // 2
+    x2 = center_x + width // 2
+    y2 = center_y + height // 2
+
+    item = detection(
+        x1,
+        y1,
+        x2,
+        y2,
+        (
+            center_x,
+            int(round(y1 + height * 0.42))
+        ),
+        (
+            center_x,
+            y2
+        )
+    )
+    item["label"] = label
+    return item
+
+
 class TrackerV41Tests(unittest.TestCase):
 
     def test_median_uses_real_detections(self):
@@ -122,6 +152,119 @@ class TrackerV41Tests(unittest.TestCase):
             20
         )
 
+
+    def test_two_people_opposite_directions_keep_ids(self):
+        tracker = Tracker(
+            max_missing=4,
+            max_distance=130
+        )
+
+        frames = [
+            [("A", 100, 70), ("B", 125, 190)],
+            [("B", 125, 170), ("A", 100, 90)],
+            [("A", 100, 110), ("B", 125, 150)],
+            [("B", 125, 130), ("A", 100, 130)],
+            [("A", 100, 150), ("B", 125, 110)],
+            [("B", 125, 90), ("A", 100, 170)],
+        ]
+
+        expected_ids = {}
+
+        for frame_index, frame in enumerate(frames):
+            detections = [
+                labeled_person(
+                    center_x,
+                    center_y,
+                    label
+                )
+                for label, center_x, center_y in frame
+            ]
+            output = tracker.update(detections)
+            current = {
+                item["label"]: item["id"]
+                for item in output
+            }
+
+            if frame_index == 0:
+                expected_ids = current
+                self.assertEqual(
+                    set(expected_ids.keys()),
+                    {"A", "B"}
+                )
+                continue
+
+            self.assertEqual(
+                current.get("A"),
+                expected_ids["A"]
+            )
+            self.assertEqual(
+                current.get("B"),
+                expected_ids["B"]
+            )
+
+    def test_merged_detection_between_opposite_tracks_is_suppressed(self):
+        tracker = Tracker(
+            max_missing=4,
+            max_distance=130
+        )
+
+        warmup = [
+            [("A", 100, 70), ("B", 125, 190)],
+            [("A", 100, 90), ("B", 125, 170)],
+            [("A", 100, 110), ("B", 125, 150)],
+        ]
+
+        expected_ids = {}
+
+        for frame_index, frame in enumerate(warmup):
+            output = tracker.update([
+                labeled_person(
+                    center_x,
+                    center_y,
+                    label
+                )
+                for label, center_x, center_y in frame
+            ])
+            current = {
+                item["label"]: item["id"]
+                for item in output
+            }
+            if frame_index == 0:
+                expected_ids = current
+
+        merged = labeled_person(
+            112,
+            130,
+            "MERGED",
+            width=75,
+            height=150
+        )
+        merged_output = tracker.update([
+            merged
+        ])
+
+        self.assertEqual(
+            merged_output,
+            []
+        )
+
+        output = tracker.update([
+            labeled_person(100, 150, "A"),
+            labeled_person(125, 110, "B")
+        ])
+        current = {
+            item["label"]: item["id"]
+            for item in output
+        }
+
+        self.assertEqual(
+            current.get("A"),
+            expected_ids["A"]
+        )
+        self.assertEqual(
+            current.get("B"),
+            expected_ids["B"]
+        )
 
 if __name__ == "__main__":
     unittest.main()
