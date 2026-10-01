@@ -1,6 +1,32 @@
+import sys
+import types
 import unittest
 
-from app.detection.detector import PersonDetector
+
+try:
+    from app.detection.detector import PersonDetector
+except ModuleNotFoundError:
+    # El filtro probado aqui no necesita OpenCV/Torch/YOLO. En CI core se
+    # simulan esos imports para ejecutar la logica sin descargar ~GB de deps.
+    sys.modules.setdefault(
+        "cv2",
+        types.ModuleType("cv2")
+    )
+    sys.modules.setdefault(
+        "torch",
+        types.ModuleType("torch")
+    )
+
+    ultralytics_stub = types.ModuleType(
+        "ultralytics"
+    )
+    ultralytics_stub.YOLO = object
+    sys.modules.setdefault(
+        "ultralytics",
+        ultralytics_stub
+    )
+
+    from app.detection.detector import PersonDetector
 
 
 def person(
