@@ -1,4 +1,4 @@
-# CONTEOPERSONAS V4.1.2
+# CONTEOPERSONAS V4.2.0
 
 Sistema distribuido para conteo de personas por cámaras RTSP, diseñado para múltiples sucursales con operación offline y servidor central.
 
@@ -11,7 +11,7 @@ CAMARA RTSP -> CLIENTE PYTHON/YOLO -> SQLite local
                                   -> Dashboard / Reportes
 ```
 
-El cliente actual es V4.1.2. La administración central conserva el protocolo V3: cada instalación usa un `CLIENT_ID` y `CLIENT_TOKEN` propio. El servidor asocia ese cliente a una sucursal/cámara y controla remotamente línea, sentido IN/OUT, margen y confianza YOLO.
+El cliente actual es V4.2.0. La administración central conserva el protocolo V3: cada instalación usa un `CLIENT_ID` y `CLIENT_TOKEN` propio. El servidor asocia ese cliente a una sucursal/cámara y controla remotamente línea, sentido IN/OUT, margen y confianza YOLO.
 
 ## Funcionalidades
 
