@@ -51,8 +51,8 @@ class PersonDetector:
         self.model = YOLO(str(resolved_model))
 
         self.tracker = Tracker(
-            max_missing=12,
-            max_distance=150
+            max_missing=18,
+            max_distance=165
         )
         self.counting_points = []
         self.motion_gate_enabled = True
@@ -446,7 +446,7 @@ class PersonDetector:
                 )
             )
             if (
-                int(person.get("hits", 1)) < 2
+                int(person.get("hits", 1)) < 3
                 or float(
                     person.get(
                         "max_displacement",
