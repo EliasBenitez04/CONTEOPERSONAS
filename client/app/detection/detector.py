@@ -65,8 +65,8 @@ class PersonDetector:
         self._idle_refresh_seconds = 2.5
         self._motion_threshold = 25
         self._motion_ratio = 0.008
-        self._motion_hold_seconds = 1.2
-        self._person_hold_seconds = 2.0
+        self._motion_hold_seconds = 1.8
+        self._person_hold_seconds = 2.5
 
         print(f"[YOLO] Modelo cargado: {resolved_model}")
         self._print_device()
@@ -216,6 +216,12 @@ class PersonDetector:
         return (
             now - self._last_inference_at
             >= self._idle_refresh_seconds
+        )
+
+    def has_recent_activity(self):
+        return (
+            time.monotonic()
+            < self._activity_until
         )
 
     def set_counting_line(self, points):
