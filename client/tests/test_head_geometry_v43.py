@@ -25,7 +25,7 @@ class HeadGeometryTests(unittest.TestCase):
         counter = LineCounter(points=[(0, 100), (500, 100)], margin=18)
         counter.stable_frames = 2
         counter.destination_frames = 2
-        points = [60, 65, 73, 95, 110, 125, 143, 154, 164]
+        points = [50, 55, 60, 65, 73, 95, 110, 125, 143, 154, 164]
         inbound = [
             counter.update(1, (150, y), (150, y + 65)) for y in points
         ]
