@@ -4,15 +4,14 @@ import time
 
 class LineCounter:
     """
-    Contador: cruce de la referencia de cabeza + validacion de locomocion.
+    Cruce de la polilinea EXCLUSIVAMENTE por recorrido real del punto
+    de cabeza, con zona neutra, origen confirmado y antirrebote por ID.
+    Los primeros frames aun no confirmados alimentan el recorrido, pero
+    no generan eventos hasta validar que la deteccion pueda contarse.
 
-    El punto superior de cabeza decide el cruce de la polilinea; el apoyo
-    inferior confirma desplazamiento perpendicular en la misma direccion.
-    Los primeros frames no confirmados alimentan el estado del cruce, pero
-    jamas generan un evento hasta que el detector confirme a la persona.
-
-    Esto evita que agacharse, levantarse o deformar el bbox sobre la linea
-    genere IN/OUT sin que la persona haya caminado realmente.
+    Con cabeza solamente no es posible distinguir perfectamente entre
+    caminar, agacharse o una oclusion; las zonas de confirmacion reducen
+    falsas activaciones, pero la ubicacion de la linea sigue siendo clave.
     """
 
     def __init__(
@@ -38,12 +37,10 @@ class LineCounter:
 
         self.stable_frames = 3
         self.destination_frames = 3
-        self.rearm_frames = 3
+        self.rearm_frames = 2
         self.max_step = 260.0
-        self.crossing_timeout_seconds = 4.0
-        # Al ingresar, la cabeza puede avanzar lentamente por perspectiva.
-        # No modificar el tiempo de confirmacion de OUT que ya funciona.
-        self.entry_crossing_timeout_seconds = 9.0
+        self.crossing_timeout_seconds = 12.0
+        self._last_prune_at = 0.0
 
         self.set_margin(margin)
 
@@ -101,58 +98,18 @@ class LineCounter:
         self.set_margin(value)
 
     def set_margin(self, margin):
-        self._margin = max(6, int(margin))
-
-        # Franja central donde no se toman decisiones por jitter.
-        self.crossing_margin = max(
-            6.0,
-            min(
-                24.0,
-                self._margin * 0.60
-            )
-        )
-
-        # El torso debe terminar fuera de esta distancia para confirmar lado.
-        self.confirm_margin = max(
-            self.crossing_margin + 5.0,
-            min(
-                42.0,
-                self._margin * 1.00
-            )
-        )
-
-        # Distancia POST-CRUCE. Tocar/cruzar la linea no alcanza:
-        # el torso debe alejarse claramente hacia el destino antes de contar.
-        self.completion_margin = max(
-            self.confirm_margin + 12.0,
-            min(
-                64.0,
-                self._margin * 2.0
-            )
-        )
-
-        # Movimiento minimo REAL del punto inferior DESPUES del cruce.
-        # Con margin=18 exige ~32 px de locomocion perpendicular.
-        self.movement_confirm_distance = max(
-            28.0,
-            min(
-                56.0,
-                self._margin * 1.80
-            )
-        )
-
-        # Despues de contar, debe alejarse aun mas antes de rearmar el ID.
-        self.rearm_margin = max(
-            self.completion_margin + 10.0,
-            min(
-                78.0,
-                self._margin * 2.40
-            )
-        )
-
+        value = max(6, min(60, int(margin)))
+        if getattr(self, "_margin", None) == value:
+            return value
+        self._margin = value
+        # Margen 12: banda neutra 5.4px, origen 10.2px, contar 18px.
+        # Validamos SOLO el punto de cabeza; no hay umbral de pies.
+        self.crossing_margin = max(4.0, min(14.0, value * 0.45))
+        self.confirm_margin = max(self.crossing_margin + 4.0, value * 0.85)
+        self.completion_margin = max(self.confirm_margin + 7.0, value * 1.5)
+        self.rearm_margin = self.completion_margin + 4.0
         if hasattr(self, "states"):
             self.states.clear()
-
         return self._margin
 
     @staticmethod
@@ -402,65 +359,11 @@ class LineCounter:
 
         return None
 
-    def _movement_progress(
-        self,
-        start_point,
-        current_point,
-        segment_index,
-        destination_side
-    ):
-        """
-        Desplazamiento del punto inferior proyectado sobre la normal del
-        segmento que realmente cruzo el torso.
-
-        Un valor positivo significa movimiento hacia el lado destino.
-        """
-        if (
-            start_point is None
-            or current_point is None
-            or segment_index is None
-        ):
-            return 0.0
-
-        p1 = self.points[segment_index]
-        p2 = self.points[segment_index + 1]
-
-        start_distance = (
-            self._line_signed_distance(
-                start_point,
-                p1,
-                p2
-            )
-        )
-        current_distance = (
-            self._line_signed_distance(
-                current_point,
-                p1,
-                p2
-            )
-        )
-
-        if (
-            start_distance is None
-            or current_distance is None
-        ):
-            return 0.0
-
-        return (
-            current_distance
-            - start_distance
-        ) * destination_side
-
-    def _new_state(
-        self,
-        point,
-        movement_point
-    ):
+    def _new_state(self, point):
         return {
             "last_point": point,
-            "last_movement_point": movement_point,
+            "last_seen_at": time.monotonic(),
             "last_origin_point": None,
-            "last_origin_movement": None,
             "stable_side": None,
             "stable_count": 0,
             "origin_side": None,
@@ -469,7 +372,7 @@ class LineCounter:
             "segment_index": None,
             "destination_side": None,
             "destination_count": 0,
-            "movement_start_point": None,
+
             "locked": False,
             "rearm_side": None,
             "rearm_count": 0,
@@ -482,7 +385,7 @@ class LineCounter:
         state["segment_index"] = None
         state["destination_side"] = None
         state["destination_count"] = 0
-        state["movement_start_point"] = None
+
 
     def update(
         self,
@@ -496,21 +399,10 @@ class LineCounter:
             float(point[1])
         )
 
-        # Compatibilidad con llamadas antiguas/tests: si no llega punto
-        # inferior, usa el mismo punto. En produccion V4.1.1 siempre llega.
-        if movement_point is None:
-            movement_current = current
-        else:
-            movement_current = (
-                float(movement_point[0]),
-                float(movement_point[1])
-            )
-
+        # movement_point se ignora para compatibilidad con llamadas anteriores.
+        # Nunca participa en la direccion ni en la confirmacion del evento.
         if track_id not in self.states:
-            state = self._new_state(
-                current,
-                movement_current
-            )
+            state = self._new_state(current)
 
             distance = self.signed_distance(
                 current
@@ -530,12 +422,11 @@ class LineCounter:
                 # IN: una observacion clara del lado exterior ya constituye
                 # un origen valido; OUT conserva la confirmacion habitual.
                 if (
-                    side == -self.in_side
-                    and abs(distance) >= self.confirm_margin + 6.0
+                    abs(distance) >= self.confirm_margin + 6.0
                 ):
                     state["origin_side"] = side
                     state["last_origin_point"] = current
-                    state["last_origin_movement"] = movement_current
+
 
             self.states[track_id] = state
             return None
@@ -543,14 +434,8 @@ class LineCounter:
         state = self.states[track_id]
 
         previous = state["last_point"]
-        previous_movement = (
-            state["last_movement_point"]
-        )
-
         state["last_point"] = current
-        state["last_movement_point"] = (
-            movement_current
-        )
+        state["last_seen_at"] = time.monotonic()
 
         distance = self.signed_distance(
             current
@@ -566,17 +451,11 @@ class LineCounter:
         if (
             state["crossed"]
             and state["crossed_at"] is not None
-            and (
-                now - state["crossed_at"]
-                > (
-                self.entry_crossing_timeout_seconds
-                if state["destination_side"] == self.in_side
-                else self.crossing_timeout_seconds
-            )
-            )
+            and now - state["crossed_at"] > self.crossing_timeout_seconds
         ):
             self._cancel_crossing(state)
             state["origin_side"] = None
+            state["last_origin_point"] = None
             state["stable_side"] = None
             state["stable_count"] = 0
 
@@ -619,8 +498,7 @@ class LineCounter:
 
                 required = self.stable_frames
                 if (
-                    side == -self.in_side
-                    and abs(distance) >= self.confirm_margin + 6.0
+                    abs(distance) >= self.confirm_margin + 6.0
                 ):
                     required = 1
 
@@ -629,7 +507,7 @@ class LineCounter:
 
                 if state["origin_side"] == side:
                     state["last_origin_point"] = current
-                    state["last_origin_movement"] = movement_current
+
 
             elif (
                 side != 0
@@ -641,7 +519,7 @@ class LineCounter:
             # neutral. Conservar el ultimo punto real del lado origen para
             # comprobar la interseccion sin deducir cruces de predicciones.
             crossing_previous = previous
-            movement_previous = previous_movement
+
             segment_index = self._find_actual_crossing(previous, current)
 
             origin_point = state["last_origin_point"]
@@ -660,7 +538,7 @@ class LineCounter:
                 )
                 if segment_index is not None:
                     crossing_previous = origin_point
-                    movement_previous = state["last_origin_movement"]
+
 
             if (
                 segment_index is not None
@@ -681,7 +559,7 @@ class LineCounter:
                     state["segment_index"] = segment_index
                     state["destination_side"] = -state["origin_side"]
                     state["destination_count"] = 0
-                    state["movement_start_point"] = movement_previous
+
 
             if not state["crossed"]:
                 return None
@@ -710,30 +588,13 @@ class LineCounter:
             state["destination_side"]
         )
 
-        movement_progress = (
-            self._movement_progress(
-                state["movement_start_point"],
-                movement_current,
-                segment_index,
-                destination
-            )
-        )
-
-        # Solo suma frames de destino cuando:
-        # 1) el torso ya recorrio una distancia POST-CRUCE suficiente;
-        # 2) el punto inferior tambien demostro locomocion real;
-        # 3) esto se mantiene varios frames consecutivos.
-        #
-        # Importante: cruzar/tocar la linea NO genera el evento.
+        # Solamente el punto de CABEZA decide el conteo, tras confirmar
+        # permanencia real en el lado destino. No se usa apoyo ni pie.
         if (
             segment_side == destination
-            and abs(segment_distance)
-            >= self.completion_margin
-            and movement_progress
-            >= self.movement_confirm_distance
+            and abs(segment_distance) >= self.completion_margin
         ):
             state["destination_count"] += 1
-
         elif (
             segment_side == state["origin_side"]
             and abs(segment_distance)
@@ -750,8 +611,8 @@ class LineCounter:
             return None
 
         else:
-            # Sigue dentro del corredor, o el torso cruzo pero los pies no
-            # demostraron locomocion real. Mantener pendiente sin contar.
+            # Dentro del corredor: reiniciar persistencia para evitar rebotes.
+            state["destination_count"] = 0
             return None
 
         if (
@@ -785,6 +646,15 @@ class LineCounter:
 
         self.exits += 1
         return "OUT"
+
+    def prune_stale_states(self, max_age_seconds=30.0):
+        now = time.monotonic()
+        if now - self._last_prune_at < 5.0:
+            return
+        self._last_prune_at = now
+        for track_id, state in list(self.states.items()):
+            if now - state["last_seen_at"] > max_age_seconds:
+                del self.states[track_id]
 
     def set_line(
         self,
