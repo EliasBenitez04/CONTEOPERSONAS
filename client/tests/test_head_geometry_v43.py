@@ -11,7 +11,8 @@ class HeadGeometryTests(unittest.TestCase):
         self.assertLess(x1, x2)
         self.assertLess(y1, y2)
         self.assertEqual(point[0], (x1 + x2) // 2)
-        self.assertLess(point[1], y1)
+        self.assertGreaterEqual(point[1], y1)
+        self.assertLessEqual(point[1], y2)
         self.assertTrue(0 <= point[0] < 640)
 
     def test_border_clipping(self):

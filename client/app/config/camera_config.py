@@ -21,7 +21,7 @@ DEFAULT_CONFIG = {
         ]
     },
     "in_side": 1,
-    "margin": 18,
+    "margin": 12,
     "confidence": 0.22,
     "config_version": 0
 }

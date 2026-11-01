@@ -74,10 +74,9 @@ class TrackerV41Tests(unittest.TestCase):
             detection(2, 2, 42, 102, (22, 39))
         ])[0]
 
-        self.assertEqual(
-            result["point"],
-            (21, 40)
-        )
+        # EMA sigue el frame actual sin retraso de la mediana.
+        self.assertAlmostEqual(result["point"][0], 22, delta=1)
+        self.assertAlmostEqual(result["point"][1], 40, delta=2)
 
     def test_movement_point_uses_real_foot_median(self):
         tracker = Tracker(

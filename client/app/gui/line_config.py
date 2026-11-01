@@ -391,7 +391,7 @@ class LineConfigurator:
                 margin=self.config.get("margin", 18)
             )
 
-            # Franja exterior: hasta aqui debe RECORRER el torso despues del
+            # Franja exterior: hasta aqui debe RECORRER la cabeza despues del
             # cruce antes de que el evento pueda confirmarse.
             completion = canvas.copy()
             completion_width = max(

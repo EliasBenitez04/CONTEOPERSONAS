@@ -694,11 +694,9 @@ class Tracker:
                 )
             )
 
-            count_point = (
-                self._median_point(
-                    track["point_history"]
-                )
-            )
+            # La mediana de tres frames retrasa el cruce real de cabeza.
+            # La EMA del ultimo punto observado no inventa predicciones.
+            count_point = track["point"]
 
             movement_point = (
                 self._median_point(
@@ -724,7 +722,7 @@ class Tracker:
                 int(round(raw_point[1]))
             )
 
-            # Torso: decide el cruce geometrico.
+            # Punto de cabeza real suavizado: decide cruce geometrico.
             item["point"] = (
                 int(round(count_point[0])),
                 int(round(count_point[1]))
