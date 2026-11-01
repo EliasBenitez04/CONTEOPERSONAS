@@ -127,16 +127,32 @@ class PersonDetector:
 
     def _predict(self, frame):
         # COCO class 0 = person. Objetos de otras clases nunca entran al tracker.
-        return self.model.predict(
-            source=frame,
-            classes=[0],
-            conf=self.confidence,
-            imgsz=self.imgsz,
-            max_det=10,
-            verbose=False,
-            device=self.device,
-            half=self.use_half
-        )
+        options = {
+            "source": frame,
+            "classes": [0],
+            "conf": self.confidence,
+            "imgsz": self.imgsz,
+            "max_det": 10,
+            "verbose": False,
+            "device": self.device,
+        }
+
+        # En CPU, el valor predeterminado de Ultralytics es FP32: no pasar
+        # half=False porque las versiones nuevas emiten una advertencia por
+        # CADA frame. En CUDA mantener FP16, usando quantize=16 cuando exista.
+        if self.use_half:
+            try:
+                from ultralytics.cfg import DEFAULT_CFG_DICT
+            except ImportError:
+                DEFAULT_CFG_DICT = {}
+
+            if "quantize" in DEFAULT_CFG_DICT:
+                options["quantize"] = 16
+            else:
+                # Compatibilidad con instalaciones antiguas de Ultralytics.
+                options["half"] = True
+
+        return self.model.predict(**options)
 
     def _motion_region(self, frame):
         """Region amplia alrededor del trazado para el motion gate."""
