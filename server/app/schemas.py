@@ -48,6 +48,11 @@ class CountEventCreate(BaseModel):
     occurred_at: datetime
 
 
+class CountEventBatchCreate(BaseModel):
+    # Lotes acotados: no permitir que un cliente monopolice el pool.
+    events: list[CountEventCreate] = Field(min_length=1, max_length=100)
+
+
 class CountEventResponse(BaseModel):
     id: int
     event_uuid: str

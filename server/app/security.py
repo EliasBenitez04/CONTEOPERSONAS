@@ -97,56 +97,59 @@ class WebAuthMiddleware(BaseHTTPMiddleware):
         if not protected:
             return await call_next(request)
 
-        database = SessionLocal()
-        user = None
-        try:
+        # No mantener conexiones mientras FastAPI procesa la respuesta.
+        # El usuario queda desacoplado del ORM para la autorizacion y las vistas.
+        with SessionLocal() as database:
             user = session_user_from_request(request, database)
-            request.state.user = user
+            if user is not None:
+                database.expunge(user)
 
-            if user is None:
-                if path.startswith("/api/") or path == "/openapi.json":
-                    return JSONResponse(
-                        status_code=status.HTTP_401_UNAUTHORIZED,
-                        content={"detail": "Sesión requerida"}
-                    )
-
-                next_path = quote(path, safe="/")
-                return RedirectResponse(
-                    url=f"/login?next={next_path}",
-                    status_code=status.HTTP_303_SEE_OTHER
+        request.state.user = user
+        if user is None:
+            if path.startswith("/api/") or path == "/openapi.json":
+                return JSONResponse(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    content={"detail": "Sesión requerida"}
                 )
-
-            is_change_path = (
-                path == "/change-password"
-                or path == "/api/auth/change-password"
-                or path == "/api/auth/me"
+            next_path = quote(path, safe="/")
+            return RedirectResponse(
+                url=f"/login?next={next_path}",
+                status_code=status.HTTP_303_SEE_OTHER
             )
 
-            if user.must_change_password and not is_change_path:
-                if path.startswith("/api/") or path == "/openapi.json":
-                    return JSONResponse(
-                        status_code=status.HTTP_403_FORBIDDEN,
-                        content={"detail": "Debe cambiar su contraseña"}
-                    )
-                return RedirectResponse(
-                    url="/change-password",
-                    status_code=status.HTTP_303_SEE_OTHER
+        is_change_path = path in (
+            "/change-password",
+            "/api/auth/change-password",
+            "/api/auth/me"
+        )
+        if user.must_change_password and not is_change_path:
+            if path.startswith("/api/") or path == "/openapi.json":
+                return JSONResponse(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    content={"detail": "Debe cambiar su contraseña"}
                 )
+            return RedirectResponse(
+                url="/change-password",
+                status_code=status.HTTP_303_SEE_OTHER
+            )
 
-            if path.startswith(self.ADMIN_PREFIXES) and user.role != "ADMIN":
-                return self._forbidden(path)
+        if path.startswith(self.ADMIN_PREFIXES) and user.role != "ADMIN":
+            return self._forbidden(path)
 
-            if (
-                path.startswith(self.SUPERVISOR_PREFIXES)
-                and user.role not in ("ADMIN", "SUPERVISOR")
-            ):
-                return self._forbidden(path)
+        if (
+            path.startswith(self.SUPERVISOR_PREFIXES)
+            and user.role not in ("ADMIN", "SUPERVISOR")
+        ):
+            return self._forbidden(path)
 
-            response = await call_next(request)
+        # El handler maneja su propia sesion. No consume una conexion adicional
+        # del middleware durante la consulta, el render o el streaming.
+        response = await call_next(request)
 
-            if self._should_audit(request):
-                try:
-                    database.add(
+        if self._should_audit(request):
+            try:
+                with SessionLocal() as audit_db:
+                    audit_db.add(
                         AuditLog(
                             user_id=user.id,
                             username=user.username,
@@ -155,8 +158,7 @@ class WebAuthMiddleware(BaseHTTPMiddleware):
                             path=path,
                             status_code=response.status_code,
                             ip_address=(
-                                request.client.host
-                                if request.client else None
+                                request.client.host if request.client else None
                             ),
                             details=(
                                 request.url.query[:1000]
@@ -164,14 +166,11 @@ class WebAuthMiddleware(BaseHTTPMiddleware):
                             )
                         )
                     )
-                    database.commit()
-                except Exception as error:
-                    database.rollback()
-                    print("[AUDIT] No se pudo registrar:", error)
+                    audit_db.commit()
+            except Exception as error:
+                print("[AUDIT] No se pudo registrar:", error)
 
-            return response
-        finally:
-            database.close()
+        return response
 
     @staticmethod
     def _should_audit(request: Request):
