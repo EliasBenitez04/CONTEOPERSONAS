@@ -594,15 +594,22 @@ def main():
                     person.get("foot_point", point)
                 )
                 countable = bool(person.get("countable", True))
-                event = (
-                    counter.update(
+                # Guardar el origen desde los primeros frames del track:
+                # antes se descartaban si faltaban hits/desplazamiento y se
+                # perdian entradas que empezaban demasiado cerca de la linea.
+                filter_reason = person.get("count_filter")
+                if countable or filter_reason == "UNCONFIRMED_STATIC":
+                    event = counter.update(
                         track_id,
                         point,
-                        movement_point
+                        movement_point,
+                        allow_count=countable
                     )
-                    if countable
-                    else None
-                )
+                else:
+                    # Una persona clasificada como pequena/cargada no debe
+                    # heredar un estado de cruce de frames anteriores.
+                    counter.states.pop(track_id, None)
+                    event = None
 
                 if render_view:
                     x1 = person["x1"]

@@ -4,11 +4,12 @@ import time
 
 class LineCounter:
     """
-    Contador V4.2.1: cruce por torso + validacion de locomocion.
+    Contador: cruce de la referencia de cabeza + validacion de locomocion.
 
-    El torso decide si hubo cruce geometrico de la polilinea, pero un evento
-    solo se confirma si el punto inferior (apoyo/pies) tambien demuestra
-    desplazamiento real en la misma direccion perpendicular a la linea.
+    El punto superior de cabeza decide el cruce de la polilinea; el apoyo
+    inferior confirma desplazamiento perpendicular en la misma direccion.
+    Los primeros frames no confirmados alimentan el estado del cruce, pero
+    jamas generan un evento hasta que el detector confirme a la persona.
 
     Esto evita que agacharse, levantarse o deformar el bbox sobre la linea
     genere IN/OUT sin que la persona haya caminado realmente.
@@ -40,6 +41,9 @@ class LineCounter:
         self.rearm_frames = 3
         self.max_step = 260.0
         self.crossing_timeout_seconds = 4.0
+        # Al ingresar, la cabeza puede avanzar lentamente por perspectiva.
+        # No modificar el tiempo de confirmacion de OUT que ya funciona.
+        self.entry_crossing_timeout_seconds = 9.0
 
         self.set_margin(margin)
 
@@ -455,6 +459,8 @@ class LineCounter:
         return {
             "last_point": point,
             "last_movement_point": movement_point,
+            "last_origin_point": None,
+            "last_origin_movement": None,
             "stable_side": None,
             "stable_count": 0,
             "origin_side": None,
@@ -482,7 +488,8 @@ class LineCounter:
         self,
         track_id,
         point,
-        movement_point=None
+        movement_point=None,
+        allow_count=True
     ):
         current = (
             float(point[0]),
@@ -520,6 +527,15 @@ class LineCounter:
             ):
                 state["stable_side"] = side
                 state["stable_count"] = 1
+                # IN: una observacion clara del lado exterior ya constituye
+                # un origen valido; OUT conserva la confirmacion habitual.
+                if (
+                    side == -self.in_side
+                    and abs(distance) >= self.confirm_margin + 6.0
+                ):
+                    state["origin_side"] = side
+                    state["last_origin_point"] = current
+                    state["last_origin_movement"] = movement_current
 
             self.states[track_id] = state
             return None
@@ -552,7 +568,11 @@ class LineCounter:
             and state["crossed_at"] is not None
             and (
                 now - state["crossed_at"]
-                > self.crossing_timeout_seconds
+                > (
+                self.entry_crossing_timeout_seconds
+                if state["destination_side"] == self.in_side
+                else self.crossing_timeout_seconds
+            )
             )
         ):
             self._cancel_crossing(state)
@@ -597,11 +617,19 @@ class LineCounter:
                     state["stable_side"] = side
                     state["stable_count"] = 1
 
+                required = self.stable_frames
                 if (
-                    state["stable_count"]
-                    >= self.stable_frames
+                    side == -self.in_side
+                    and abs(distance) >= self.confirm_margin + 6.0
                 ):
+                    required = 1
+
+                if state["stable_count"] >= required:
                     state["origin_side"] = side
+
+                if state["origin_side"] == side:
+                    state["last_origin_point"] = current
+                    state["last_origin_movement"] = movement_current
 
             elif (
                 side != 0
@@ -609,47 +637,51 @@ class LineCounter:
             ):
                 state["stable_count"] = 0
 
-            segment_index = (
-                self._find_actual_crossing(
-                    previous,
-                    current
+            # Una observacion en el eje puede caer justo en la franja
+            # neutral. Conservar el ultimo punto real del lado origen para
+            # comprobar la interseccion sin deducir cruces de predicciones.
+            crossing_previous = previous
+            movement_previous = previous_movement
+            segment_index = self._find_actual_crossing(previous, current)
+
+            origin_point = state["last_origin_point"]
+            if (
+                segment_index is None
+                and state["origin_side"] is not None
+                and origin_point is not None
+                and origin_point != previous
+                and math.hypot(
+                    current[0] - origin_point[0],
+                    current[1] - origin_point[1]
+                ) <= self.max_step
+            ):
+                segment_index = self._find_actual_crossing(
+                    origin_point, current
                 )
-            )
+                if segment_index is not None:
+                    crossing_previous = origin_point
+                    movement_previous = state["last_origin_movement"]
 
             if (
                 segment_index is not None
                 and state["origin_side"] is not None
             ):
-                previous_raw = (
-                    self._line_signed_distance(
-                        previous,
-                        self.points[segment_index],
-                        self.points[
-                            segment_index + 1
-                        ]
-                    )
+                previous_raw = self._line_signed_distance(
+                    crossing_previous,
+                    self.points[segment_index],
+                    self.points[segment_index + 1]
                 )
 
                 if (
                     previous_raw is not None
-                    and self._sign(previous_raw)
-                    == state["origin_side"]
+                    and self._sign(previous_raw) == state["origin_side"]
                 ):
                     state["crossed"] = True
                     state["crossed_at"] = now
-                    state["segment_index"] = (
-                        segment_index
-                    )
-                    state["destination_side"] = (
-                        -state["origin_side"]
-                    )
+                    state["segment_index"] = segment_index
+                    state["destination_side"] = -state["origin_side"]
                     state["destination_count"] = 0
-
-                    # Se toma el apoyo inmediatamente ANTES del cruce del
-                    # torso. Agacharse deja este punto casi igual; caminar no.
-                    state["movement_start_point"] = (
-                        previous_movement
-                    )
+                    state["movement_start_point"] = movement_previous
 
             if not state["crossed"]:
                 return None
@@ -726,6 +758,11 @@ class LineCounter:
             state["destination_count"]
             < self.destination_frames
         ):
+            return None
+
+        # Seguir la trayectoria aunque YOLO aun clasifique el track como
+        # UNCONFIRMED_STATIC. Nunca confirmar ni incrementar en ese estado.
+        if not allow_count:
             return None
 
         state["locked"] = True

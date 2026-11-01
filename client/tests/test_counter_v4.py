@@ -41,6 +41,64 @@ class LineCounterV41Tests(unittest.TestCase):
 
         return events
 
+    def test_in_remembers_origin_while_track_is_unconfirmed(self):
+        counter = self.make_counter()
+        counter.stable_frames = 2
+        counter.destination_frames = 2
+        samples = [
+            (65, 170), (70, 175), (78, 180), (95, 190),
+            (108, 201), (125, 216), (138, 228), (145, 235),
+            (152, 245)
+        ]
+        events = [
+            counter.update(
+                17, (100, head), (100, foot),
+                allow_count=index >= 5
+            )
+            for index, (head, foot) in enumerate(samples)
+        ]
+        self.assertEqual([event for event in events if event], ["IN"])
+        self.assertEqual(counter.entries, 1)
+
+    def test_in_armed_with_single_clear_origin_frame(self):
+        counter = self.make_counter()
+        counter.stable_frames = 2
+        counter.destination_frames = 2
+        samples = [
+            (65, 165), (96, 197), (111, 212), (125, 227),
+            (137, 239), (145, 250)
+        ]
+        events = [
+            counter.update(18, (100, y), (100, foot))
+            for y, foot in samples
+        ]
+        self.assertEqual([event for event in events if event], ["IN"])
+
+    def test_out_still_requires_stable_origin(self):
+        counter = self.make_counter()
+        counter.stable_frames = 2
+        counter.destination_frames = 2
+        # Un solo fotograma en lado OUT no debe producir una salida.
+        points = [135, 105, 90, 75, 60, 48, 42]
+        events = self.feed(counter, 21, [(100, y) for y in points])
+        self.assertEqual(events, [])
+
+    def test_unconfirmed_track_never_increments_by_itself(self):
+        counter = self.make_counter()
+        counter.stable_frames = 2
+        counter.destination_frames = 2
+        points = [65, 70, 80, 95, 110, 125, 139, 150, 165]
+        events = [
+            counter.update(31, (100, y), (100, y + 100), allow_count=False)
+            for y in points
+        ]
+        self.assertEqual([event for event in events if event], [])
+        self.assertEqual(counter.entries, 0)
+        self.assertEqual(
+            counter.update(31, (100, 170), (100, 270), allow_count=True),
+            "IN"
+        )
+
     def test_normal_in_counts_once(self):
         counter = self.make_counter()
         events = self.feed(
