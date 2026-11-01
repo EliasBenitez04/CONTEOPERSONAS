@@ -6,7 +6,7 @@ personas completas, y el conteo usa una referencia consistente arriba del bbox.
 
 
 def estimate_head_geometry(x1, y1, x2, y2, frame_width, frame_height):
-    """Retorna (cuadro_cabeza, punto_superior), ambos limitados al fotograma."""
+    """Retorna (cuadro_cabeza, punto_frontal), ambos limitados al fotograma."""
     frame_width = max(1, int(frame_width))
     frame_height = max(1, int(frame_height))
     left = max(0, min(frame_width - 1, int(x1)))
@@ -21,8 +21,10 @@ def estimate_head_geometry(x1, y1, x2, y2, frame_width, frame_height):
     head_y1 = max(0, min(frame_height - 1, round(top + height * 0.02)))
     head_y2 = max(head_y1, min(frame_height - 1, round(top + height * 0.25)))
 
+    # Ancla frontal dentro del bbox: y1 puede quedarse fijo en el borde
+    # superior cuando la cabeza aparece recortada en la imagen.
     point_x = int(round((head_x1 + head_x2) / 2))
-    point_y = max(0, head_y1 - 6)
+    point_y = max(head_y1, min(head_y2, int(round(top + height * 0.16))))
     return (
         (int(head_x1), int(head_y1), int(head_x2), int(head_y2)),
         (point_x, point_y)

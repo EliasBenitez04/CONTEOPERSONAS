@@ -391,7 +391,7 @@ class LineConfigurator:
                 margin=self.config.get("margin", 18)
             )
 
-            # Franja exterior: hasta aqui debe RECORRER el torso despues del
+            # Franja exterior: hasta aqui debe RECORRER la cabeza despues del
             # cruce antes de que el evento pueda confirmarse.
             completion = canvas.copy()
             completion_width = max(
@@ -529,7 +529,7 @@ class LineConfigurator:
 
         cv2.putText(
             canvas,
-            "+/-: ajustar margen | S/ENTER: guardar",
+            "+/-: margen | M: usar 12px | S/ENTER: guardar",
             (25, 168),
             cv2.FONT_HERSHEY_SIMPLEX,
             0.58,
@@ -654,6 +654,12 @@ class LineConfigurator:
                     "[CONFIG] Margen reducido: "
                     f"{self.config['margin']} px"
                 )
+                continue
+
+            if key == ord("m"):
+                self.config["margin"] = 12
+                self.draw()
+                print("[CONFIG] Margen recomendado aplicado: 12 px.")
                 continue
 
             if key == ord("i"):

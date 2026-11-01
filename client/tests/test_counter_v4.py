@@ -74,14 +74,14 @@ class LineCounterV41Tests(unittest.TestCase):
         ]
         self.assertEqual([event for event in events if event], ["IN"])
 
-    def test_out_still_requires_stable_origin(self):
+    def test_out_follows_same_clear_origin_rule_as_in(self):
         counter = self.make_counter()
         counter.stable_frames = 2
         counter.destination_frames = 2
-        # Un solo fotograma en lado OUT no debe producir una salida.
+        # Regla simetrica: un origen inicial claro y un cruce completo.
         points = [135, 105, 90, 75, 60, 48, 42]
         events = self.feed(counter, 21, [(100, y) for y in points])
-        self.assertEqual(events, [])
+        self.assertEqual(events, ["OUT"])
 
     def test_unconfirmed_track_never_increments_by_itself(self):
         counter = self.make_counter()
@@ -98,6 +98,26 @@ class LineCounterV41Tests(unittest.TestCase):
             counter.update(31, (100, 170), (100, 270), allow_count=True),
             "IN"
         )
+
+    def test_head_only_counts_even_when_foot_reference_is_static(self):
+        counter = self.make_counter()
+        counter.stable_frames = 2
+        counter.destination_frames = 2
+        samples = [(65, 180), (72, 180), (85, 180),
+                   (96, 180), (105, 180), (118, 180),
+                   (132, 180), (143, 180)]
+        events = self.feed_with_movement(
+            counter, 901,
+            [((100, y), (100, foot)) for y, foot in samples]
+        )
+        self.assertEqual(events, ["IN"])
+
+    def test_no_origin_at_line_does_not_count(self):
+        counter = self.make_counter()
+        counter.stable_frames = 2
+        counter.destination_frames = 2
+        points = [(100, y) for y in (99, 102, 108, 113, 128, 140)]
+        self.assertEqual(self.feed(counter, 902, points), [])
 
     def test_normal_in_counts_once(self):
         counter = self.make_counter()

@@ -97,7 +97,7 @@ def draw_direction_labels(frame, counter, points):
 
 def draw_counting_path(frame, counter, points):
     # El trazado magenta es SOLO el centro. La franja exterior representa la
-    # distancia post-cruce que debe alcanzar el torso antes de poder contar.
+    # desplazamiento posterior que debe completar el punto de cabeza.
     completion = frame.copy()
     completion_thickness = max(
         12,
@@ -416,7 +416,10 @@ def main():
     # legitimos. Dos observaciones reales por lado conservan antirrebote.
     counter.stable_frames = 2
     counter.destination_frames = 2
-    print("[CONTEO] Confirmacion simetrica IN/OUT: 2 muestras por lado.")
+    print(
+        "[CONTEO] Solo cabeza (sin pies): "
+        f"Margen={counter.margin}px, confirmacion simetrica IN/OUT."
+    )
 
     database = LocalDatabase()
     event_writer = AsyncEventWriter(database)
@@ -589,25 +592,21 @@ def main():
             for person in persons:
                 track_id = person["id"]
                 point = person["point"]
-                movement_point = person.get(
-                    "movement_point",
-                    person.get("foot_point", point)
-                )
                 countable = bool(person.get("countable", True))
                 # Guardar el origen desde los primeros frames del track:
                 # antes se descartaban si faltaban hits/desplazamiento y se
                 # perdian entradas que empezaban demasiado cerca de la linea.
                 filter_reason = person.get("count_filter")
-                if countable or filter_reason == "UNCONFIRMED_STATIC":
+                if countable or filter_reason in (
+                    "UNCONFIRMED_STATIC", "SMALL_PERSON"
+                ):
+                    # Los primeros cuadros pueden tener cuerpo recortado;
+                    # preservar el recorrido REAL de cabeza sin contabilizar
+                    # hasta que el detector valide a la persona.
                     event = counter.update(
-                        track_id,
-                        point,
-                        movement_point,
-                        allow_count=countable
+                        track_id, point, allow_count=countable
                     )
                 else:
-                    # Una persona clasificada como pequena/cargada no debe
-                    # heredar un estado de cruce de frames anteriores.
                     counter.states.pop(track_id, None)
                     event = None
 
@@ -663,6 +662,8 @@ def main():
                     )
                     event_writer.enqueue(count_event)
                     synchronizer.notify_new_event()
+
+            counter.prune_stale_states()
 
             if settings.HEADLESS:
                 continue
