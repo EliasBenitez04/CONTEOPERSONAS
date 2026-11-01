@@ -15,6 +15,11 @@ class HeadGeometryTests(unittest.TestCase):
         self.assertLessEqual(point[1], y2)
         self.assertTrue(0 <= point[0] < 640)
 
+    def test_head_anchor_moves_when_top_is_clipped(self):
+        _, before = estimate_head_geometry(100, -80, 220, 250, 640, 480)
+        _, after = estimate_head_geometry(100, -120, 220, 280, 640, 480)
+        self.assertNotEqual(before[1], after[1])
+
     def test_border_clipping(self):
         box, point = estimate_head_geometry(-20, -30, 50, 90, 100, 70)
         self.assertGreaterEqual(min(box), 0)

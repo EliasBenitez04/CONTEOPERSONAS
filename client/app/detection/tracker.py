@@ -257,6 +257,8 @@ class Tracker:
 
             "vx": 0.0,
             "vy": 0.0,
+            "head_vx": 0.0,
+            "head_vy": 0.0,
             "vw": 0.0,
             "vh": 0.0,
 
@@ -298,8 +300,8 @@ class Tracker:
             dcy - predicted_y
         )
 
-        # El torso participa en asociacion porque suele seguir visible aunque
-        # los pies se ocluyan parcialmente.
+        # Seguimiento por bbox global e identidad de la CABEZA.
+        # Los pies NO influyen en el costo de asociacion.
         detected_point = (
             self._detection_point(
                 detection,
@@ -309,9 +311,9 @@ class Tracker:
 
         predicted_point = (
             track["point"][0]
-            + track["vx"],
+            + track.get("head_vx", 0.0),
             track["point"][1]
-            + track["vy"]
+            + track.get("head_vy", 0.0)
         )
 
         anchor_distance = math.hypot(
@@ -319,25 +321,6 @@ class Tracker:
             - predicted_point[0],
             detected_point[1]
             - predicted_point[1]
-        )
-
-        detected_movement = (
-            self._detection_movement_point(
-                detection,
-                (dcx, dcy)
-            )
-        )
-        predicted_movement = (
-            track["movement_point"][0]
-            + track["vx"],
-            track["movement_point"][1]
-            + track["vy"]
-        )
-        movement_anchor_distance = math.hypot(
-            detected_movement[0]
-            - predicted_movement[0],
-            detected_movement[1]
-            - predicted_movement[1]
         )
 
         diagonal = max(
@@ -441,10 +424,6 @@ class Tracker:
                 anchor_distance
                 > dynamic_distance * 1.20
             )
-            and (
-                movement_anchor_distance
-                > dynamic_distance * 1.35
-            )
             and iou < 0.025
         ):
             return None
@@ -458,8 +437,7 @@ class Tracker:
 
         return (
             distance
-            + anchor_distance * 0.18
-            + movement_anchor_distance * 0.10
+            + anchor_distance * 0.32
             - iou * 155.0
             + size_delta * 45.0
             + direction_penalty
@@ -865,6 +843,17 @@ class Tracker:
             * point_alpha_y
         )
 
+        track["head_vx"] = (
+            track.get("head_vx", 0.0) * 0.55
+            + (measured_point_x - old_point_x) * 0.45
+        )
+        track["head_vy"] = (
+            track.get("head_vy", 0.0) * 0.55
+            + (measured_point_y - old_point_y) * 0.45
+        )
+
+        # Referencia inferior solo conservada para pruebas de compatibilidad.
+        # No interviene en tracking ni en conteo.
         track["movement_point"] = (
             measured_movement_x,
             measured_movement_y

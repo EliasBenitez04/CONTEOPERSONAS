@@ -459,8 +459,8 @@ class LineCounter:
             state["stable_side"] = None
             state["stable_count"] = 0
 
-        # Despues de un conteo, jitter o agacharse cerca de la linea no puede
-        # volver a disparar hasta que el torso se aleje claramente.
+        # Luego de contar, el mismo ID debe alejar el punto de cabeza
+        # antes de poder registrar un cruce en sentido opuesto.
         if state["locked"]:
             if (
                 side == state["rearm_side"]
@@ -484,7 +484,7 @@ class LineCounter:
 
             return None
 
-        # Antes del cruce: demostrar un origen estable fuera del corredor.
+        # Antes del cruce: observar cabeza del lado origen.
         if not state["crossed"]:
             if (
                 side != 0
@@ -621,8 +621,8 @@ class LineCounter:
         ):
             return None
 
-        # Seguir la trayectoria aunque YOLO aun clasifique el track como
-        # UNCONFIRMED_STATIC. Nunca confirmar ni incrementar en ese estado.
+        # Conservar trayectoria aunque YOLO no haya validado la persona.
+        # No confirmar ni incrementar mientras no sea elegible.
         if not allow_count:
             return None
 
