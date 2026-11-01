@@ -173,6 +173,21 @@ class LocalDatabase:
             )
             connection.commit()
 
+    def mark_batch_synchronized(self, event_uuids):
+        if not event_uuids:
+            return
+        synced_at = datetime.now().astimezone().isoformat(timespec="seconds")
+        with self.connect() as connection:
+            connection.executemany(
+                """
+                UPDATE count_events
+                SET synchronized = 1, synced_at = ?
+                WHERE event_uuid = ? AND synchronized = 0
+                """,
+                [(synced_at, value) for value in set(event_uuids)]
+            )
+            connection.commit()
+
     def get_recent_events(self, limit=20):
         with self.connect() as connection:
             rows = connection.execute(
