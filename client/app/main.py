@@ -412,6 +412,11 @@ def main():
         in_side=config["in_side"],
         margin=config["margin"]
     )
+    # En accesos estrechos, 3 muestras por lado a 8 FPS omitian cruces
+    # legitimos. Dos observaciones reales por lado conservan antirrebote.
+    counter.stable_frames = 2
+    counter.destination_frames = 2
+    print("[CONTEO] Confirmacion simetrica IN/OUT: 2 muestras por lado.")
 
     database = LocalDatabase()
     event_writer = AsyncEventWriter(database)
@@ -610,52 +615,19 @@ def main():
                         if countable
                         else (0, 180, 255)
                     )
+                    # Visualizar solo la cabeza estimada, sin la caja corporal.
+                    head_x1, head_y1, head_x2, head_y2 = person.get(
+                        "head_box", (x1, y1, x2, y2)
+                    )
                     cv2.rectangle(
                         frame,
-                        (x1, y1),
-                        (x2, y2),
+                        (head_x1, head_y1),
+                        (head_x2, head_y2),
                         box_color,
                         2
                     )
-
-                    # Punto rojo grande = torso realmente usado por el contador.
-                    cv2.circle(
-                        frame,
-                        point,
-                        6,
-                        (0, 0, 255),
-                        -1
-                    )
-
-                    # Cabeza/pie son referencias auxiliares de diagnostico.
-                    head_point = person.get("head_point")
-                    foot_point = person.get("foot_point")
-                    movement_point = person.get("movement_point")
-                    if head_point:
-                        cv2.circle(
-                            frame,
-                            head_point,
-                            3,
-                            (255, 255, 0),
-                            -1
-                        )
-                    if foot_point:
-                        cv2.circle(
-                            frame,
-                            foot_point,
-                            3,
-                            (0, 255, 255),
-                            -1
-                        )
-
-                    if movement_point:
-                        cv2.circle(
-                            frame,
-                            movement_point,
-                            5,
-                            (255, 0, 0),
-                            1
-                        )
+                    # El MISMO punto suavizado decide el cruce y se dibuja.
+                    cv2.circle(frame, point, 5, (0, 0, 255), -1)
 
                     cv2.putText(
                         frame,
@@ -667,7 +639,7 @@ def main():
                                 f"{person.get('count_filter', 'NO CUENTA')}"
                             )
                         ),
-                        (x1, max(22, y1 - 10)),
+                        (head_x1, max(22, head_y1 - 16)),
                         cv2.FONT_HERSHEY_SIMPLEX,
                         0.62,
                         box_color,

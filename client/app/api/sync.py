@@ -23,6 +23,9 @@ class EventSynchronizer:
         self._stop_event = threading.Event()
         self._wake_event = threading.Event()
         self._config_lock = threading.Lock()
+        self._sync_lock = threading.Lock()
+        self._failures = 0
+        self._retry_after = 0.0
 
         self._last_heartbeat_at = 0.0
         self._last_config_check_at = 0.0
@@ -41,46 +44,76 @@ class EventSynchronizer:
     def notify_new_event(self):
         self._wake_event.set()
 
-    def sync_once(self):
-        pending = self.database.get_pending_events(
-            limit=self.batch_size
+    def _sync_failure(self, result):
+        self._failures += 1
+        status = result.get("status_code")
+        delay = (
+            60.0 if status in (401, 403)
+            else min(60.0, float(2 ** min(self._failures, 6)))
         )
-        if not pending:
-            return 0
+        self._retry_after = time.monotonic() + delay
+        self._last_error = (
+            f"SYNC HTTP={status}: {str(result.get('error'))[:280]}"
+        )[:500]
+        print(f"[SYNC] Fallo HTTP={status}; proximo intento en {delay:g}s.")
 
-        synchronized = 0
-        for event in pending:
-            if self._stop_event.is_set():
-                break
+    def sync_once(self):
+        # El cierre y el worker nunca deben usar la misma Session HTTP a la vez.
+        with self._sync_lock:
+            if time.monotonic() < self._retry_after:
+                return 0
+            pending = self.database.get_pending_events(limit=min(100, self.batch_size))
+            if not pending:
+                return 0
 
-            result = self.api_client.send_count_event(event)
+            result = self.api_client.send_count_events_batch(pending)
+            if not result["success"] and result["status_code"] in (404, 405):
+                # Compatibilidad con servidores V4.2.1 sin endpoint de lotes.
+                sent_uuids = []
+                for event in pending:
+                    item_result = self.api_client.send_count_event(event)
+                    if not item_result["success"]:
+                        self.database.mark_batch_synchronized(sent_uuids)
+                        self._sync_failure(item_result)
+                        return len(sent_uuids)
+                    sent_uuids.append(event["event_uuid"])
+                self.database.mark_batch_synchronized(sent_uuids)
+                self._failures = 0
+                self._retry_after = 0.0
+                self._last_error = None
+                print(f"[SYNC] {len(sent_uuids)} eventos enviados (API legacy).")
+                return len(sent_uuids)
+
             if not result["success"]:
-                self._last_error = (
-                    f"SYNC HTTP={result['status_code']} "
-                    f"{result['error']}"
-                )[:500]
-                print(
-                    "[SYNC] Servidor no disponible o rechazo. "
-                    f"Evento pendiente: {event['event_uuid']} | "
-                    f"HTTP={result['status_code']} | "
-                    f"{result['error']}"
-                )
-                break
+                self._sync_failure(result)
+                return 0
 
-            self.database.mark_as_synchronized(
-                event["event_uuid"]
-            )
-            synchronized += 1
-            self._last_error = None
+            data = result.get("data")
+            ack = data.get("accepted_uuids") if isinstance(data, dict) else None
+            requested = {event["event_uuid"] for event in pending}
+            if not isinstance(ack, list) or not all(
+                isinstance(value, str) and value in requested for value in ack
+            ):
+                self._sync_failure({
+                    "status_code": result.get("status_code"),
+                    "error": "Confirmacion de lote invalida"
+                })
+                return 0
 
-            print(
-                "[SYNC] Evento sincronizado: "
-                f"{event['event_type']} "
-                f"ID={event.get('track_id')} "
-                f"UUID={event['event_uuid']}"
-            )
-
-        return synchronized
+            accepted = set(ack)
+            if accepted:
+                self.database.mark_batch_synchronized(list(accepted))
+            if len(accepted) != len(requested):
+                self._sync_failure({
+                    "status_code": result.get("status_code"),
+                    "error": "Confirmacion parcial del lote"
+                })
+            else:
+                self._failures = 0
+                self._retry_after = 0.0
+                self._last_error = None
+            print(f"[SYNC] Lote confirmado: {len(accepted)}/{len(requested)}.")
+            return len(accepted)
 
     def send_heartbeat_if_due(self, force=False):
         now = time.monotonic()
@@ -176,20 +209,17 @@ class EventSynchronizer:
             self._wake_event.clear()
 
     def close(self, final_sync=True):
-        if final_sync:
+        self._stop_event.set()
+        self._wake_event.set()
+        self.thread.join(timeout=max(5, self.api_client.timeout * 4 + 2))
+        if final_sync and not self.thread.is_alive():
             try:
                 self.send_heartbeat_if_due(force=True)
                 self.sync_once()
             except Exception as error:
-                print(
-                    "[SYNC] Error en sincronizacion final:",
-                    error
-                )
-
-        self._stop_event.set()
-        self._wake_event.set()
-        self.thread.join(
-            timeout=max(5, self.interval_seconds + 1)
-        )
-        self.api_client.close()
+                print("[SYNC] Error en sincronizacion final:", error)
+        if not self.thread.is_alive():
+            self.api_client.close()
+        else:
+            print("[SYNC] Worker sigue activo; se evita cerrar su sesion HTTP.")
         print("[SYNC] Sincronizador detenido.")

@@ -137,8 +137,9 @@ class APIClient:
             "confidence": min(99, max(1, int(round(confidence * 100))))
         }
 
-    def send_count_event(self, event: dict):
-        payload = {
+    @staticmethod
+    def _event_payload(event: dict):
+        return {
             "event_uuid": event["event_uuid"],
             "branch_id": event["branch_id"],
             "camera_name": event["camera_name"],
@@ -146,10 +147,17 @@ class APIClient:
             "event_type": event["event_type"],
             "occurred_at": event["occurred_at"]
         }
+
+    def send_count_event(self, event: dict):
+        return self._request(
+            "POST", "/count-events", self._event_payload(event)
+        )
+
+    def send_count_events_batch(self, events: list[dict]):
         return self._request(
             "POST",
-            "/count-events",
-            payload
+            "/count-events/batch",
+            {"events": [self._event_payload(e) for e in events]}
         )
 
     def send_heartbeat(

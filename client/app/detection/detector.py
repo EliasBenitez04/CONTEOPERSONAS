@@ -6,6 +6,7 @@ import torch
 from ultralytics import YOLO
 
 from app.detection.tracker import Tracker
+from app.detection.head_geometry import estimate_head_geometry
 from app.paths import resource_path
 
 
@@ -76,8 +77,8 @@ class PersonDetector:
             print(f"[YOLO] Hilos CPU maximos: {self.cpu_threads}")
         print("[TRACKER] Prediccion de movimiento e IoU mejorados habilitados.")
         print(
-            "[CONTEO] Ancla corporal: torso 42% + "
-            "mediana de 3 detecciones reales."
+            "[CONTEO] Ancla de cruce: punto superior de cabeza estimada "
+            "+ mediana de 3 observaciones reales."
         )
         print("[YOLO] Motion gate de segundo plano habilitado.")
 
@@ -320,23 +321,15 @@ class PersonDetector:
                 min(frame_width - 1, x1 + (width // 2))
             )
 
-            # Tres referencias reales del mismo bbox. El conteo principal usa
-            # torso porque es mas estable ante pies ocultos y estaturas distintas.
-            head_y = y1 + int(round(height * 0.12))
-            torso_y = y1 + int(round(height * 0.42))
-            foot_y = y2
-
-            head_point = (
-                center_x,
-                max(0, min(frame_height - 1, head_y))
-            )
-            torso_point = (
-                center_x,
-                max(0, min(frame_height - 1, torso_y))
+            # Se sigue detectando la persona COMPLETA, preservando IDs,
+            # oclusiones y filtro adulto. Solo el punto de cruce va en cabeza.
+            # El apoyo inferior se conserva como validacion de locomocion.
+            head_box, head_point = estimate_head_geometry(
+                x1, y1, x2, y2, frame_width, frame_height
             )
             foot_point = (
                 center_x,
-                max(0, min(frame_height - 1, foot_y))
+                max(0, min(frame_height - 1, y2))
             )
 
             detections.append({
@@ -345,8 +338,9 @@ class PersonDetector:
                 "x2": x2,
                 "y2": y2,
                 "confidence": float(confidence),
+                "head_box": head_box,
                 "head_point": head_point,
-                "point": torso_point,
+                "point": head_point,
                 "foot_point": foot_point
             })
 

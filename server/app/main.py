@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from fastapi import Depends, FastAPI, HTTPException, Query, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import func, select, text
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from starlette.middleware.trustedhost import TrustedHostMiddleware
@@ -17,6 +18,7 @@ from app.schemas import (
     CameraCreate,
     CameraResponse,
     CountEventCreate,
+    CountEventBatchCreate,
     CountEventResponse,
     CountSummary,
     HealthResponse
@@ -296,6 +298,58 @@ def create_count_event(
         f"Camara={camera.name} | Track={event.track_id} | UUID={event.event_uuid}"
     )
     return event_to_response(event)
+
+
+@app.post(f"{settings.API_PREFIX}/count-events/batch")
+def create_count_events_batch(
+    payload: CountEventBatchCreate,
+    machine_client=Depends(resolve_machine_auth),
+    database: Session = Depends(get_database)
+):
+    """Insercion atomica e idempotente para clientes con SQLite offline."""
+    # Un mismo UUID en el mismo lote se registra y confirma solo una vez.
+    unique = {str(event.event_uuid): event for event in payload.events}
+
+    if machine_client is not None:
+        branch_id = machine_client.branch_id
+        camera = database.get(Camera, machine_client.camera_id)
+        if camera is None or not camera.active or not machine_client.branch.active:
+            raise HTTPException(status_code=403, detail="Camara o sucursal inactiva")
+    else:
+        origins = {(e.branch_id, e.camera_name.strip()) for e in unique.values()}
+        if len(origins) != 1:
+            raise HTTPException(
+                status_code=422,
+                detail="El lote debe pertenecer a una unica camara"
+            )
+        branch_id, camera_name = origins.pop()
+        get_or_create_branch(database, branch_id)
+        camera = get_or_create_camera(database, branch_id, camera_name)
+
+    rows = [
+        {
+            "event_uuid": event_uuid,
+            "branch_id": branch_id,
+            "camera_id": camera.id,
+            "track_id": item.track_id,
+            "event_type": item.event_type,
+            "occurred_at": item.occurred_at
+        }
+        for event_uuid, item in unique.items()
+    ]
+
+    # PostgreSQL 9.5+ soporta ON CONFLICT; incluso con reintentos, ningun UUID
+    # se cuenta dos veces. Confirmar IDs solo despues del commit.
+    database.execute(
+        pg_insert(CountEvent).values(rows).on_conflict_do_nothing(
+            index_elements=["event_uuid"]
+        )
+    )
+    database.commit()
+    return {
+        "accepted_uuids": list(unique),
+        "accepted": len(unique)
+    }
 
 
 @app.get(
