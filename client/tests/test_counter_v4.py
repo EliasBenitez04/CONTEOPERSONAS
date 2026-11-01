@@ -92,7 +92,7 @@ class LineCounterV41Tests(unittest.TestCase):
             counter.update(31, (100, y), (100, y + 100), allow_count=False)
             for y in points
         ]
-        self.assertEqual(events, [])
+        self.assertEqual([event for event in events if event], [])
         self.assertEqual(counter.entries, 0)
         self.assertEqual(
             counter.update(31, (100, 170), (100, 270), allow_count=True),
