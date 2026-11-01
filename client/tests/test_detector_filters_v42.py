@@ -185,5 +185,58 @@ class DetectorFilterV42Tests(unittest.TestCase):
         )
 
 
+
+
+class InferencePrecisionTests(unittest.TestCase):
+    """El warning de half no debe repetirse por cada imagen procesada."""
+
+    @staticmethod
+    def make_detector(use_half):
+        class StubModel:
+            def __init__(self):
+                self.options = None
+
+            def predict(self, **kwargs):
+                self.options = kwargs
+                return []
+
+        detector = PersonDetector.__new__(PersonDetector)
+        detector.model = StubModel()
+        detector.device = 0 if use_half else "cpu"
+        detector.use_half = use_half
+        detector.confidence = 0.4
+        detector.imgsz = 416
+        return detector
+
+    def test_cpu_omits_deprecated_half(self):
+        detector = self.make_detector(False)
+        detector._predict("frame")
+        self.assertNotIn("half", detector.model.options)
+        self.assertNotIn("quantize", detector.model.options)
+        self.assertEqual(detector.model.options["device"], "cpu")
+
+    def test_cuda_uses_quantize_when_supported(self):
+        from unittest.mock import patch
+
+        cfg = types.ModuleType("ultralytics.cfg")
+        cfg.DEFAULT_CFG_DICT = {"quantize": None}
+        with patch.dict(sys.modules, {"ultralytics.cfg": cfg}):
+            detector = self.make_detector(True)
+            detector._predict("frame")
+            self.assertEqual(detector.model.options["quantize"], 16)
+            self.assertNotIn("half", detector.model.options)
+
+    def test_cuda_legacy_uses_half_only_if_necessary(self):
+        from unittest.mock import patch
+
+        cfg = types.ModuleType("ultralytics.cfg")
+        cfg.DEFAULT_CFG_DICT = {"half": False}
+        with patch.dict(sys.modules, {"ultralytics.cfg": cfg}):
+            detector = self.make_detector(True)
+            detector._predict("frame")
+            self.assertIs(detector.model.options["half"], True)
+            self.assertNotIn("quantize", detector.model.options)
+
+
 if __name__ == "__main__":
     unittest.main()
