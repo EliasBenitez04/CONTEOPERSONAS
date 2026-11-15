@@ -22,6 +22,7 @@ class RTSPCamera:
         self.copy_frame = bool(copy_frame)
 
         self.running = False
+        self.connection_generation = 0
 
     def set_max_fps(self, max_fps: float, announce: bool = True):
         value = max(0.0, float(max_fps))
@@ -53,6 +54,7 @@ class RTSPCamera:
     def start(self):
         self.running = True
         next_frame_at = 0.0
+        last_frame = None
 
         while self.running:
             if not self.camera.is_connected():
@@ -67,6 +69,8 @@ class RTSPCamera:
                     continue
 
                 next_frame_at = 0.0
+                last_frame = None
+                self.connection_generation += 1
 
             frame_interval = self.frame_interval
             if frame_interval > 0:
@@ -75,7 +79,7 @@ class RTSPCamera:
                     time.sleep(next_frame_at - now)
 
             success, frame = self.camera.read(
-                copy_frame=self.copy_frame
+                copy_frame=False
             )
 
             if not success:
@@ -87,6 +91,13 @@ class RTSPCamera:
                 time.sleep(self.reconnect_seconds)
                 continue
 
+            # El reader publica un ndarray nuevo por frame. Si RTSP va mas
+            # lento que PROCESS_FPS no confirmar hits/cruces con la misma imagen.
+            if frame is last_frame:
+                time.sleep(0.005)
+                continue
+            last_frame = frame
+
             frame_interval = self.frame_interval
             if frame_interval > 0:
                 next_frame_at = (
@@ -95,7 +106,7 @@ class RTSPCamera:
             else:
                 next_frame_at = 0.0
 
-            yield frame
+            yield frame.copy() if self.copy_frame else frame
 
     def stop(self):
         self.running = False

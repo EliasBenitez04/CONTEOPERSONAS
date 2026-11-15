@@ -238,5 +238,63 @@ class InferencePrecisionTests(unittest.TestCase):
             self.assertNotIn("quantize", detector.model.options)
 
 
+
+
+class HeadModelAndRoiTests(unittest.TestCase):
+    def setUp(self):
+        self.detector = PersonDetector.__new__(PersonDetector)
+        self.detector.detection_target = 'head'
+        self.detector.target_class_id = 0
+
+    def test_head_mode_rejects_coco_person_weights(self):
+        with self.assertRaises(ValueError):
+            self.detector._validate_target_class({0: 'person'})
+        self.detector._validate_target_class({0: 'head'})
+
+    def test_head_boxes_do_not_use_body_height_filter(self):
+        items = [dict(id=1, x1=100, y1=100, x2=130, y2=130,
+                      hits=4, max_displacement=20)]
+        result = self.detector._classify_countable(items, 1080)
+        self.assertTrue(result[0]['countable'])
+        self.assertEqual(result[0]['count_filter'], 'HEAD')
+        items[0]['hits'] = 1
+        self.assertFalse(self.detector._classify_countable(items, 1080)[0]['countable'])
+
+    def test_roi_validated_and_offset_restored_to_global_coordinates(self):
+        from unittest.mock import Mock
+        import numpy as np
+        from app.detection.tracker import Tracker
+        detector = self.detector
+        detector.detection_roi = detector._parse_roi('100,50,400,350')
+        frame = np.zeros((480, 640, 3), dtype=np.uint8)
+        detector.tracker = Tracker()
+        detector._background_motion_detected = Mock(return_value=True)
+        detector._activity_until = 0
+        detector._person_hold_seconds = 2.5
+        result = Mock()
+        # boxes must support len; a small concrete wrapper avoids YOLO imports.
+        class Boxes:
+            def __init__(self):
+                self.data = Mock()
+                self.data.detach.return_value.cpu.return_value.tolist.return_value = [[10, 20, 40, 60, .9, 0]]
+            def __len__(self):
+                return 1
+        result.boxes = Boxes()
+        detector._predict = Mock(return_value=[result])
+        tracked = detector.track(frame)
+        self.assertEqual(detector._predict.call_args.args[0].shape, (300, 300, 3))
+        self.assertEqual(tracked[0]['head_box'], (110, 70, 140, 110))
+        self.assertEqual(tracked[0]['point'], (125, 90))
+        self.assertFalse(tracked[0]['countable'])
+        detector.detection_roi = (0, 0, 1000, 1000)
+        with self.assertRaises(ValueError):
+            detector._inference_region(frame)
+
+    def test_bad_roi_is_rejected(self):
+        for value in ['a,b,c,d', '1,2,3', '100,0,50,50', '-1,0,50,50']:
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                self.detector._parse_roi(value)
+
+
 if __name__ == "__main__":
     unittest.main()

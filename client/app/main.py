@@ -398,7 +398,10 @@ def main():
     )
 
     detector = PersonDetector(
-        model_path="yolov8n.pt",
+        model_path=settings.YOLO_MODEL_PATH,
+        detection_target=settings.DETECTION_TARGET,
+        target_class_id=settings.YOLO_CLASS_ID,
+        detection_roi=settings.DETECTION_ROI,
         confidence=float(config.get("confidence", 0.22)),
         imgsz=initial_imgsz,
         cpu_threads=settings.YOLO_CPU_THREADS
@@ -452,8 +455,14 @@ def main():
         tray = TrayController(WINDOW_TITLE)
         tray.start()
 
+    camera_generation = None
     try:
         for frame in camera.start():
+            if camera.connection_generation != camera_generation:
+                detector.reset_tracker()
+                counter.states.clear()
+                camera_generation = camera.connection_generation
+
             if tray is not None:
                 if tray.exit_requested():
                     print("[TRAY] Salida solicitada desde el icono.")

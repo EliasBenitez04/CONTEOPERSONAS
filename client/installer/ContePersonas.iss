@@ -1,6 +1,6 @@
 #define MyAppName "ContePersonas"
 #ifndef MyAppVersion
-#define MyAppVersion "4.2.1"
+#define MyAppVersion "4.4.0"
 #endif
 #define MyAppExeName "ContePersonas.exe"
 

@@ -40,6 +40,7 @@ class LineCounter:
         self.rearm_frames = 2
         self.max_step = 260.0
         self.crossing_timeout_seconds = 12.0
+        self.max_observation_gap_seconds = 2.0
         self._last_prune_at = 0.0
 
         self.set_margin(margin)
@@ -401,6 +402,15 @@ class LineCounter:
 
         # movement_point se ignora para compatibilidad con llamadas anteriores.
         # Nunca participa en la direccion ni en la confirmacion del evento.
+        # Una desaparicion prolongada o salto de identidad rompe el recorrido.
+        # Nunca unir posiciones antiguas con una nueva persona tras reconectar.
+        old_state = self.states.get(track_id)
+        if old_state is not None and (
+            time.monotonic() - old_state["last_seen_at"] > self.max_observation_gap_seconds
+            or math.dist(old_state["last_point"], current) > self.max_step
+        ):
+            del self.states[track_id]
+
         if track_id not in self.states:
             state = self._new_state(current)
 
@@ -419,8 +429,7 @@ class LineCounter:
             ):
                 state["stable_side"] = side
                 state["stable_count"] = 1
-                # IN: una observacion clara del lado exterior ya constituye
-                # un origen valido; OUT conserva la confirmacion habitual.
+                # Una observacion clara arma el origen en ambos sentidos.
                 if (
                     abs(distance) >= self.confirm_margin + 6.0
                 ):
@@ -486,59 +495,10 @@ class LineCounter:
 
         # Antes del cruce: observar cabeza del lado origen.
         if not state["crossed"]:
-            if (
-                side != 0
-                and abs(distance) >= self.confirm_margin
-            ):
-                if side == state["stable_side"]:
-                    state["stable_count"] += 1
-                else:
-                    state["stable_side"] = side
-                    state["stable_count"] = 1
-
-                required = self.stable_frames
-                if (
-                    abs(distance) >= self.confirm_margin + 6.0
-                ):
-                    required = 1
-
-                if state["stable_count"] >= required:
-                    state["origin_side"] = side
-
-                if state["origin_side"] == side:
-                    state["last_origin_point"] = current
-
-
-            elif (
-                side != 0
-                and side != state["stable_side"]
-            ):
-                state["stable_count"] = 0
-
-            # Una observacion en el eje puede caer justo en la franja
-            # neutral. Conservar el ultimo punto real del lado origen para
-            # comprobar la interseccion sin deducir cruces de predicciones.
+            # Comprobar la trayectoria ANTES de actualizar el origen: un
+            # paso rapido puede saltar todo el corredor entre dos frames.
             crossing_previous = previous
-
             segment_index = self._find_actual_crossing(previous, current)
-
-            origin_point = state["last_origin_point"]
-            if (
-                segment_index is None
-                and state["origin_side"] is not None
-                and origin_point is not None
-                and origin_point != previous
-                and math.hypot(
-                    current[0] - origin_point[0],
-                    current[1] - origin_point[1]
-                ) <= self.max_step
-            ):
-                segment_index = self._find_actual_crossing(
-                    origin_point, current
-                )
-                if segment_index is not None:
-                    crossing_previous = origin_point
-
 
             if (
                 segment_index is not None
@@ -562,6 +522,35 @@ class LineCounter:
 
 
             if not state["crossed"]:
+                if (
+                    side != 0
+                    and abs(distance) >= self.confirm_margin
+                ):
+                    if side == state["stable_side"]:
+                        state["stable_count"] += 1
+                    else:
+                        state["stable_side"] = side
+                        state["stable_count"] = 1
+
+                    required = self.stable_frames
+                    if (
+                        abs(distance) >= self.confirm_margin + 6.0
+                    ):
+                        required = 1
+
+                    if state["stable_count"] >= required:
+                        state["origin_side"] = side
+
+                    if state["origin_side"] == side:
+                        state["last_origin_point"] = current
+
+
+                elif (
+                    side != 0
+                    and side != state["stable_side"]
+                ):
+                    state["stable_count"] = 0
+
                 return None
 
         segment_index = state["segment_index"]

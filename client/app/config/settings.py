@@ -57,7 +57,7 @@ def _env_float(name: str, default: float, minimum=None) -> float:
 
 
 class Settings:
-    APP_VERSION = "4.3.2"
+    APP_VERSION = "4.4.0"
 
     CAMERA_NAME = os.getenv("CAMERA_NAME", "CAMARA_01")
     CAMERA_RTSP_URL = os.getenv("CAMERA_RTSP_URL", "")
@@ -112,6 +112,11 @@ class Settings:
             _env_float("CROSSING_PROCESS_FPS", 12.0, minimum=1.0)
         )
     )
+
+    YOLO_MODEL_PATH = os.getenv("YOLO_MODEL_PATH", "yolov8n.pt").strip()
+    DETECTION_TARGET = os.getenv("DETECTION_TARGET", "person").strip().lower()
+    YOLO_CLASS_ID = _env_int("YOLO_CLASS_ID", 0, minimum=0)
+    DETECTION_ROI = os.getenv("DETECTION_ROI", "").strip()
 
     YOLO_IMGSZ = _env_int("YOLO_IMGSZ", 512, minimum=320)
     BACKGROUND_YOLO_IMGSZ = min(

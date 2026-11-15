@@ -17,11 +17,22 @@ class PersonDetector:
         model_path="yolov8n.pt",
         confidence=0.22,
         imgsz=640,
-        cpu_threads=1
+        cpu_threads=1,
+        detection_target="person",
+        target_class_id=0,
+        detection_roi=""
     ):
         resolved_model = Path(model_path)
         if not resolved_model.is_absolute():
             resolved_model = resource_path(str(resolved_model))
+
+        self.detection_target = str(detection_target).strip().lower()
+        if self.detection_target not in {"person", "head"}:
+            raise ValueError("DETECTION_TARGET debe ser person o head")
+        self.target_class_id = int(target_class_id)
+        self.detection_roi = self._parse_roi(detection_roi)
+        if not resolved_model.is_file():
+            raise FileNotFoundError(f"Falta el modelo local: {resolved_model}")
 
         self.confidence = float(confidence)
         self.imgsz = self._normalize_imgsz(imgsz)
@@ -51,6 +62,8 @@ class PersonDetector:
 
         self.model = YOLO(str(resolved_model))
 
+        self._validate_target_class(self.model.names)
+
         self.tracker = Tracker(
             max_missing=18,
             max_distance=165
@@ -77,10 +90,48 @@ class PersonDetector:
             print(f"[YOLO] Hilos CPU maximos: {self.cpu_threads}")
         print("[TRACKER] Prediccion de movimiento e IoU mejorados habilitados.")
         print(
-            "[CONTEO] Ancla de cruce: punto superior de cabeza estimada "
-            "+ mediana de 3 observaciones reales."
+            "[CONTEO] " + (
+                "Cabeza detectada: centro de caja + suavizado EMA. Sin filtro de edad."
+                if self.detection_target == "head" else
+                "Cabeza ESTIMADA desde cuerpo + suavizado EMA (modelo person)."
+            )
         )
         print("[YOLO] Motion gate de segundo plano habilitado.")
+
+    @staticmethod
+    def _parse_roi(value):
+        if not value:
+            return None
+        try:
+            coords = tuple(int(v.strip()) for v in value.split(","))
+        except (ValueError, AttributeError) as error:
+            raise ValueError("DETECTION_ROI requiere x1,y1,x2,y2 en pixeles") from error
+        if len(coords) != 4 or min(coords) < 0 or coords[2] <= coords[0] or coords[3] <= coords[1]:
+            raise ValueError("DETECTION_ROI invalida: requiere x1 < x2 e y1 < y2")
+        return coords
+
+    def _validate_target_class(self, names):
+        try:
+            label = str(names[self.target_class_id]).strip().lower()
+        except (KeyError, IndexError) as error:
+            raise ValueError("YOLO_CLASS_ID no existe en el modelo") from error
+        expected = ({"head", "human head", "human_head", "person_head", "cabeza"}
+                    if self.detection_target == "head" else {"person", "persona"})
+        if label not in expected:
+            raise ValueError(
+                f"Clase {self.target_class_id} = {label!r}; incompatible con "
+                f"DETECTION_TARGET={self.detection_target}. Use pesos entrenados para ese objeto."
+            )
+
+    def _inference_region(self, frame):
+        roi = getattr(self, "detection_roi", None)
+        if roi is None:
+            return frame, 0, 0
+        x1, y1, x2, y2 = roi
+        height, width = frame.shape[:2]
+        if x2 > width or y2 > height:
+            raise ValueError("DETECTION_ROI supera la resolucion actual de la camara")
+        return frame[y1:y2, x1:x2], x1, y1
 
     @staticmethod
     def _normalize_imgsz(imgsz):
@@ -126,10 +177,10 @@ class PersonDetector:
         print(f"[YOLO] Hilos CPU maximos: {self.cpu_threads}")
 
     def _predict(self, frame):
-        # COCO class 0 = person. Objetos de otras clases nunca entran al tracker.
+        # Solo la clase validada del modelo entra al tracker (person o head).
         options = {
             "source": frame,
-            "classes": [0],
+            "classes": [getattr(self, "target_class_id", 0)],
             "conf": self.confidence,
             "imgsz": self.imgsz,
             "max_det": 10,
@@ -191,7 +242,8 @@ class PersonDetector:
         if now < self._activity_until:
             return True
 
-        motion_frame = self._motion_region(frame)
+        motion_frame = (frame if getattr(self, "detection_roi", None)
+                        else self._motion_region(frame))
         height, width = motion_frame.shape[:2]
         if height <= 0 or width <= 0:
             return True
@@ -293,17 +345,21 @@ class PersonDetector:
         print(f"[YOLO] Tamano de inferencia: {self.imgsz}")
 
     def track(self, frame):
-        if not self._background_motion_detected(frame):
+        inference_frame, offset_x, offset_y = self._inference_region(frame)
+        # Con ROI las coordenadas de la linea siguen siendo globales. El gate
+        # inspecciona todo el recorte, no vuelve a aplicar el trazado global.
+        motion_frame = inference_frame if self.detection_roi else frame
+        if not self._background_motion_detected(motion_frame):
             return self.tracker.update([])
 
         try:
-            results = self._predict(frame)
+            results = self._predict(inference_frame)
         except Exception as error:
             if not self.cuda_enabled:
                 raise
 
             self._disable_cuda(error)
-            results = self._predict(frame)
+            results = self._predict(inference_frame)
 
         now = time.monotonic()
         self._last_inference_at = now
@@ -325,10 +381,12 @@ class PersonDetector:
 
             x1, y1, x2, y2 = row[:4]
             confidence = row[4]
-            x1 = int(x1)
-            y1 = int(y1)
-            x2 = int(x2)
-            y2 = int(y2)
+            x1 = max(0, min(frame_width - 1, int(x1) + offset_x))
+            y1 = max(0, min(frame_height - 1, int(y1) + offset_y))
+            x2 = max(0, min(frame_width - 1, int(x2) + offset_x))
+            y2 = max(0, min(frame_height - 1, int(y2) + offset_y))
+            if x2 <= x1 or y2 <= y1:
+                continue
 
             width = max(1, x2 - x1)
             height = max(1, y2 - y1)
@@ -337,12 +395,13 @@ class PersonDetector:
                 min(frame_width - 1, x1 + (width // 2))
             )
 
-            # Se sigue detectando la persona COMPLETA, preservando IDs,
-            # oclusiones y filtro adulto. Solo el punto de cruce va en cabeza.
-            # El apoyo inferior se conserva como validacion de locomocion.
-            head_box, head_point = estimate_head_geometry(
-                x1, y1, x2, y2, frame_width, frame_height
-            )
+            if self.detection_target == "head":
+                head_box = (x1, y1, x2, y2)
+                head_point = (center_x, y1 + height // 2)
+            else:
+                head_box, head_point = estimate_head_geometry(
+                    x1, y1, x2, y2, frame_width, frame_height
+                )
             foot_point = (
                 center_x,
                 max(0, min(frame_height - 1, y2))
@@ -414,6 +473,16 @@ class PersonDetector:
           estaticos con forma humana.
         - Mantiene el filtro de persona pequena/bebe cargado.
         """
+        if getattr(self, "detection_target", "person") == "head":
+            # Una cabeza no permite deducir altura corporal/edad. No reutilizar
+            # el filtro adulto: rechazaria todas las cajas de cabeza pequenas.
+            for person in persons:
+                confirmed = (int(person.get("hits", 1)) >= 3
+                             and float(person.get("max_displacement", 0)) >= 7.0)
+                person["countable"] = confirmed
+                person["count_filter"] = "HEAD" if confirmed else "UNCONFIRMED_STATIC"
+            return persons
+
         for person in persons:
             person["countable"] = True
             person["count_filter"] = "ADULT"

@@ -26,8 +26,11 @@ jobs:
       - name: Compile client
         run: python -m compileall -q client/app client/tests server/app
 
+      - name: Install assignment dependency
+        run: python -m pip install scipy
+
       - name: Counter and tracker tests
         working-directory: client
         env:
           PYTHONPATH: .
-        run: python -m unittest tests.test_counter_v4 tests.test_tracker_v41 tests.test_detector_filters_v42 tests.test_head_geometry_v43
+        run: python -m unittest discover -s tests -v

@@ -1,5 +1,5 @@
 import math
-from functools import lru_cache
+from scipy.optimize import linear_sum_assignment
 
 
 class Tracker:
@@ -468,8 +468,8 @@ class Tracker:
         Asignacion global de costo minimo.
 
         El greedy anterior podia tomar primero una pareja localmente barata y
-        dejar la segunda persona con un ID incorrecto. Con max_det pequeno,
-        DP por mascara es rapido y evita ese problema.
+        dejar la segunda persona con un ID incorrecto. La asignacion rectangular
+        mantiene el optimo global sin el costo exponencial ni las tuplas almacenadas del DP por mascara.
         """
         if not self.tracks or not detections:
             return {}, set()
@@ -539,83 +539,29 @@ class Tracker:
                         detection_index
                     )
 
-        new_track_penalty = 150.0
+        # Cada fila (deteccion) elige un track o una columna ficticia (ID nuevo).
+        # Restar el costo de perder el track conserva el objetivo del DP anterior;
+        # la suma de costos de todos los tracks perdidos es una constante.
+        matrix = []
+        for detection_index in range(detection_count):
+            row = []
+            for index, track_id in enumerate(track_ids):
+                track = self.tracks[track_id]
+                if track["hits"] >= 3 and track["missing"] <= 2:
+                    miss_penalty = 70.0
+                elif track["missing"] <= 5:
+                    miss_penalty = 35.0
+                else:
+                    miss_penalty = 8.0
+                cost = costs[index][detection_index]
+                row.append(float("inf") if cost is None else cost - miss_penalty)
+            row.extend([150.0] * detection_count)
+            matrix.append(row)
 
-        @lru_cache(maxsize=None)
-        def solve(track_index, used_mask):
-            if track_index >= len(track_ids):
-                unmatched = (
-                    detection_count
-                    - used_mask.bit_count()
-                )
-                return (
-                    unmatched * new_track_penalty,
-                    ()
-                )
-
-            track_id = track_ids[track_index]
-            track = self.tracks[track_id]
-
-            if (
-                track["hits"] >= 3
-                and track["missing"] <= 2
-            ):
-                miss_penalty = 70.0
-            elif track["missing"] <= 5:
-                miss_penalty = 35.0
-            else:
-                miss_penalty = 8.0
-
-            skipped_cost, skipped_pairs = solve(
-                track_index + 1,
-                used_mask
-            )
-            best_cost = (
-                miss_penalty
-                + skipped_cost
-            )
-            best_pairs = skipped_pairs
-
-            for detection_index in range(detection_count):
-                if used_mask & (1 << detection_index):
-                    continue
-
-                candidate_cost = costs[
-                    track_index
-                ][detection_index]
-
-                if candidate_cost is None:
-                    continue
-
-                next_cost, next_pairs = solve(
-                    track_index + 1,
-                    used_mask | (1 << detection_index)
-                )
-                total_cost = (
-                    candidate_cost
-                    + next_cost
-                )
-
-                if total_cost < best_cost:
-                    best_cost = total_cost
-                    best_pairs = (
-                        (
-                            track_ids[track_index],
-                            detection_index
-                        ),
-                    ) + next_pairs
-
-            return best_cost, best_pairs
-
-        _, pairs = solve(0, 0)
-
-        return (
-            {
-                detection_index: track_id
-                for track_id, detection_index in pairs
-            },
-            suppressed_detections
-        )
+        rows, columns = linear_sum_assignment(matrix)
+        return ({int(row): track_ids[int(column)]
+                 for row, column in zip(rows, columns)
+                 if column < len(track_ids)}, suppressed_detections)
 
     def update(self, detections):
         """
@@ -629,8 +575,9 @@ class Tracker:
             track["missing"] += 1
             track["age"] += 1
 
+        self._remove_expired()
+
         if not detections:
-            self._remove_expired()
             return []
 
         (
