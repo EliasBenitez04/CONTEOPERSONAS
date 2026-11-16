@@ -298,7 +298,7 @@ def export_reports_csv(
     writer = csv.writer(output, delimiter=";")
     writer.writerow([
         "ID", "Fecha", "Hora", "Sucursal", "Camara",
-        "Tipo", "Track ID", "UUID"
+        "Tipo", "Valor", "Track ID", "UUID"
     ])
 
     for event in events:
@@ -310,6 +310,7 @@ def export_reports_csv(
             event.branch.name,
             event.camera.name,
             event.event_type,
+            1,
             event.track_id if event.track_id is not None else "",
             event.event_uuid
         ])
