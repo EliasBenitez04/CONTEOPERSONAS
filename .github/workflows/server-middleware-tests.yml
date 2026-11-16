@@ -1,4 +1,4 @@
-name: Server ASGI Middleware Tests
+name: Server Middleware and Windows Runner Tests
 
 on:
   push:
@@ -16,11 +16,17 @@ on:
 
 jobs:
   middleware-tests:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        python-version: ['3.12', '3.14']
+        include:
+          - os: ubuntu-latest
+            python-version: '3.12'
+          - os: ubuntu-latest
+            python-version: '3.14'
+          - os: windows-latest
+            python-version: '3.14'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -33,3 +39,6 @@ jobs:
       - name: Run ASGI regression tests
         working-directory: server
         run: python -m unittest discover -s tests -p "test_security_asgi.py" -v
+      - name: Verify HTTP runner and selector event loop
+        working-directory: server
+        run: python -m unittest discover -s tests -p "test_serve.py" -v
