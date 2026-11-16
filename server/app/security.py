@@ -1,8 +1,9 @@
 from urllib.parse import quote
 
 from fastapi import Request, status
-from fastapi.responses import JSONResponse, RedirectResponse
-from starlette.middleware.base import BaseHTTPMiddleware
+from fastapi.responses import JSONResponse, RedirectResponse, Response
+from starlette.concurrency import run_in_threadpool
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from app.auth import session_user_from_request
 from app.config import settings
@@ -10,7 +11,7 @@ from app.database import SessionLocal
 from app.models import AuditLog
 
 
-class WebAuthMiddleware(BaseHTTPMiddleware):
+class WebAuthMiddleware:
     AUTHENTICATED_PREFIXES = (
         "/dashboard",
         "/api/dashboard-data",
@@ -34,7 +35,76 @@ class WebAuthMiddleware(BaseHTTPMiddleware):
         "/openapi.json"
     )
 
-    async def dispatch(self, request: Request, call_next):
+    def __init__(self, app: ASGIApp):
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send):
+        # Middleware ASGI puro: evita la capa de streams de BaseHTTPMiddleware
+        # que podia generar multiples CancelledError al cerrar Uvicorn.
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        request = Request(scope, receive=receive)
+        authorization = await self._authorize(request)
+        if isinstance(authorization, Response):
+            await authorization(scope, receive, send)
+            return
+
+        # Las APIs de las camaras siguen funcionando sin sesion de navegador.
+        if authorization is None:
+            await self.app(scope, receive, send)
+            return
+
+        user = authorization
+        if not self._should_audit(request):
+            await self.app(scope, receive, send)
+            return
+
+        path = request.url.path
+        method = request.method
+        ip_address = request.client.host if request.client else None
+        details = request.url.query[:1000] if request.url.query else None
+
+        async def send_with_audit(message: Message):
+            if message["type"] == "http.response.start":
+                # Auditar antes de enviar la respuesta, inclusive CSV en streaming.
+                # No mantener una conexion a PostgreSQL durante el streaming.
+                await run_in_threadpool(
+                    self._write_audit, user.id, user.username, method,
+                    path, message["status"], ip_address, details
+                )
+            await send(message)
+
+        await self.app(scope, receive, send_with_audit)
+
+    @staticmethod
+    def _load_user(request: Request):
+        with SessionLocal() as database:
+            user = session_user_from_request(request, database)
+            if user is not None:
+                database.expunge(user)
+            return user
+
+    @staticmethod
+    def _write_audit(user_id, username, method, path, status_code, ip_address, details):
+        try:
+            with SessionLocal() as audit_db:
+                audit_db.add(AuditLog(
+                    user_id=user_id,
+                    username=username,
+                    action=WebAuthMiddleware._action_name_for(method, path),
+                    method=method,
+                    path=path,
+                    status_code=status_code,
+                    ip_address=ip_address,
+                    details=details
+                ))
+                audit_db.commit()
+        except Exception as error:
+            print("[AUDIT] No se pudo registrar:", error)
+
+    async def _authorize(self, request: Request):
         path = request.url.path
 
         if settings.ENVIRONMENT == "production":
@@ -95,15 +165,11 @@ class WebAuthMiddleware(BaseHTTPMiddleware):
         )
 
         if not protected:
-            return await call_next(request)
+            return None
 
         # No mantener conexiones mientras FastAPI procesa la respuesta.
         # El usuario queda desacoplado del ORM para la autorizacion y las vistas.
-        with SessionLocal() as database:
-            user = session_user_from_request(request, database)
-            if user is not None:
-                database.expunge(user)
-
+        user = await run_in_threadpool(self._load_user, request)
         request.state.user = user
         if user is None:
             if path.startswith("/api/") or path == "/openapi.json":
@@ -142,35 +208,9 @@ class WebAuthMiddleware(BaseHTTPMiddleware):
         ):
             return self._forbidden(path)
 
-        # El handler maneja su propia sesion. No consume una conexion adicional
-        # del middleware durante la consulta, el render o el streaming.
-        response = await call_next(request)
-
-        if self._should_audit(request):
-            try:
-                with SessionLocal() as audit_db:
-                    audit_db.add(
-                        AuditLog(
-                            user_id=user.id,
-                            username=user.username,
-                            action=self._action_name(request),
-                            method=request.method,
-                            path=path,
-                            status_code=response.status_code,
-                            ip_address=(
-                                request.client.host if request.client else None
-                            ),
-                            details=(
-                                request.url.query[:1000]
-                                if request.url.query else None
-                            )
-                        )
-                    )
-                    audit_db.commit()
-            except Exception as error:
-                print("[AUDIT] No se pudo registrar:", error)
-
-        return response
+        # El endpoint maneja su propia sesion. La autenticacion no retiene
+        # conexiones de base de datos mientras el handler procesa la solicitud.
+        return user
 
     @staticmethod
     def _should_audit(request: Request):
@@ -179,8 +219,7 @@ class WebAuthMiddleware(BaseHTTPMiddleware):
         return request.url.path == "/api/reports/export.csv"
 
     @staticmethod
-    def _action_name(request: Request):
-        path = request.url.path
+    def _action_name_for(method: str, path: str):
         if path.startswith("/api/admin/clients"):
             return "Administración de cliente"
         if path.startswith("/api/admin/branches"):
@@ -193,7 +232,7 @@ class WebAuthMiddleware(BaseHTTPMiddleware):
             return "Exportación de reporte"
         if path == "/api/auth/change-password":
             return "Cambio de contraseña"
-        return f"{request.method} {path}"
+        return f"{method} {path}"
 
     @staticmethod
     def _forbidden(path: str):
