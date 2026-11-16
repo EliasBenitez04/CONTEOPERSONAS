@@ -133,6 +133,29 @@ class ClientConfig(Base):
     client: Mapped[ClientDevice] = relationship(back_populates="config")
 
 
+class ClientConfigHistory(Base):
+    __tablename__ = "client_config_history"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    client_device_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("client_devices.id"), nullable=False, index=True
+    )
+    config_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    line_x1: Mapped[int] = mapped_column(Integer, nullable=False)
+    line_y1: Mapped[int] = mapped_column(Integer, nullable=False)
+    line_x2: Mapped[int] = mapped_column(Integer, nullable=False)
+    line_y2: Mapped[int] = mapped_column(Integer, nullable=False)
+    line_points: Mapped[str | None] = mapped_column(Text, nullable=True)
+    in_side: Mapped[int] = mapped_column(Integer, nullable=False)
+    margin: Mapped[int] = mapped_column(Integer, nullable=False)
+    confidence: Mapped[int] = mapped_column(Integer, nullable=False)
+    actor: Mapped[str] = mapped_column(String(100), nullable=False)
+    action: Mapped[str] = mapped_column(String(30), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+
+
 class CountEvent(Base):
     __tablename__ = "count_events"
     __table_args__ = (
