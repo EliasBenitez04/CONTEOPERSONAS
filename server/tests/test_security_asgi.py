@@ -11,7 +11,7 @@ from app.security import WebAuthMiddleware
 async def asgi_response(scope, receive, send):
     # Verifica que el usuario autenticado llegue al endpoint.
     if scope["path"].startswith("/api/admin/") and "state" in scope:
-        assert getattr(scope["state"], "user", None) is not None
+        assert scope["state"].get("user") is not None
     await send({"type": "http.response.start", "status": 200, "headers": []})
     await send({"type": "http.response.body", "body": b"ok"})
 
