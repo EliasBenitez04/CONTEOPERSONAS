@@ -11,5 +11,5 @@ call ".venv\Scripts\activate.bat"
 python -m app.setup_database
 if errorlevel 1 exit /b 1
 
-python -m uvicorn app.web:app --host 0.0.0.0 --port 8000 --workers 1
+python -m app.serve
 endlocal
