@@ -96,6 +96,17 @@
     </div><div class="modal-footer"><button type="button" class="btn btn-light" data-bs-dismiss="modal">Cancelar</button><button class="btn btn-dark">Guardar</button></div></form>
 </div></div></div>
 
+<div class="modal fade" id="historyModal" tabindex="-1"><div class="modal-dialog modal-xl modal-dialog-scrollable"><div class="modal-content">
+    <div class="modal-header"><h5 class="modal-title" id="historyTitle">Historial de configuraciones</h5><button class="btn-close" data-bs-dismiss="modal"></button></div>
+    <div class="modal-body">
+        <div class="alert alert-info small">Cada cambio genera una versión nueva. Restaurar conserva la configuración actual en el historial y publica la seleccionada en el cliente.</div>
+        <div class="table-responsive"><table class="table table-sm table-hover align-middle">
+            <thead><tr><th>Fecha</th><th>Versión</th><th>Usuario / origen</th><th>Acción</th><th>Coordenadas / puntos</th><th>IN side</th><th>Margen</th><th>Confianza</th><th></th></tr></thead>
+            <tbody id="historyRows"></tbody>
+        </table></div>
+    </div><div class="modal-footer"><button class="btn btn-light" data-bs-dismiss="modal">Cerrar</button></div>
+</div></div></div>
+
 <div class="modal fade" id="tokenModal" tabindex="-1"><div class="modal-dialog"><div class="modal-content">
     <div class="modal-header"><h5 class="modal-title">Credenciales del cliente</h5><button class="btn-close" data-bs-dismiss="modal"></button></div>
     <div class="modal-body">
@@ -111,6 +122,7 @@
 const createModal=new bootstrap.Modal('#createModal');
 const configModal=new bootstrap.Modal('#configModal');
 const tokenModal=new bootstrap.Modal('#tokenModal');
+const historyModal=new bootstrap.Modal('#historyModal');
 let clients=[];
 function esc(v){return String(v??'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;')}
 function alertMsg(m,t='success'){document.getElementById('alertContainer').innerHTML=`<div class="alert alert-${t}">${esc(m)}</div>`}
@@ -122,13 +134,42 @@ function render(){const b=document.getElementById('tableBody');if(!clients.lengt
 <td><div class="mono">${esc(c.client_id)}</div><div class="small text-secondary">Config v${c.config_version}</div></td>
 <td><span class="badge ${!c.active?'text-bg-secondary':online?'text-bg-success':'text-bg-danger'}">${!c.active?'INACTIVO':online?'ONLINE':'OFFLINE'}</span>${c.last_error?`<div class="small text-danger mt-1" title="${esc(c.last_error)}">Con error</div>`:''}</td>
 <td>${esc(c.app_version||'-')}</td><td>${c.pending_events}</td><td class="small">${fmt(c.last_seen_at)}</td>
-<td class="text-end pe-4"><button class="btn btn-sm btn-outline-dark me-1" onclick="editConfig(${c.id})"><i class="bi bi-sliders"></i></button><button class="btn btn-sm btn-outline-primary me-1" onclick="rotate(${c.id})" title="Rotar token"><i class="bi bi-key"></i></button><button class="btn btn-sm ${c.active?'btn-outline-warning':'btn-outline-success'}" onclick="toggle(${c.id})">${c.active?'Desactivar':'Activar'}</button></td></tr>`}).join('')}
+<td class="text-end pe-4"><button class="btn btn-sm btn-outline-dark me-1" onclick="editConfig(${c.id})" title="Editar configuración"><i class="bi bi-sliders"></i></button><button class="btn btn-sm btn-outline-secondary me-1" onclick="openHistory(${c.id})" title="Historial de configuraciones"><i class="bi bi-clock-history"></i> Historial</button><button class="btn btn-sm btn-outline-primary me-1" onclick="rotate(${c.id})" title="Rotar token"><i class="bi bi-key"></i></button><button class="btn btn-sm ${c.active?'btn-outline-warning':'btn-outline-success'}" onclick="toggle(${c.id})">${c.active?'Desactivar':'Activar'}</button></td></tr>`}).join('')}
 document.getElementById('branchId').addEventListener('change',()=>{const bid=document.getElementById('branchId').value;document.querySelectorAll('#cameraId option[data-branch]').forEach(o=>o.hidden=bid&&o.dataset.branch!==bid);document.getElementById('cameraId').value=''})
 document.getElementById('newButton').onclick=()=>createModal.show();
 document.getElementById('createForm').onsubmit=async e=>{e.preventDefault();const r=await fetch('/api/admin/clients',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({branch_id:+document.getElementById('branchId').value,camera_id:+document.getElementById('cameraId').value})});if(!r.ok){alertMsg(await err(r),'danger');return}const d=await r.json();createModal.hide();showToken(d);await load()};
 function showToken(d){document.getElementById('shownClientId').value=d.client_id;document.getElementById('shownToken').value=d.client_token;tokenModal.show()}
+let historyClientId=null;
+async function openHistory(id){
+    historyClientId=id;
+    const c=clients.find(x=>x.id===id);
+    document.getElementById('historyTitle').textContent='Historial — '+(c?c.branch_name+' / '+c.camera_name:id);
+    document.getElementById('historyRows').innerHTML='<tr><td colspan="9" class="text-center">Cargando...</td></tr>';
+    historyModal.show();
+    const r=await fetch(`/api/admin/clients/${id}/config/history`);
+    if(!r.ok){document.getElementById('historyRows').innerHTML='<tr><td colspan="9" class="text-danger">'+esc(await err(r))+'</td></tr>';return}
+    const rows=await r.json();
+    document.getElementById('historyRows').innerHTML=rows.length?rows.map(h=>`<tr>
+        <td class="small">${esc(fmt(h.created_at))}</td>
+        <td>v${h.config_version}</td><td>${esc(h.actor)}</td><td>${esc(h.action)}</td>
+        <td class="mono">${esc(h.line.points.map(p=>p.join(',')).join(' → '))}</td>
+        <td>${h.in_side>0?'+1':'-1'}</td><td>${h.margin}px</td><td>${h.confidence}%</td>
+        <td><button class="btn btn-sm btn-outline-primary" onclick="restoreHistory(${h.id})">Restaurar</button></td>
+    </tr>`).join(''):'<tr><td colspan="9" class="text-center text-secondary">No hay versiones guardadas todavía. El historial comienza con los próximos cambios.</td></tr>';
+}
+async function restoreHistory(historyId){
+    if(!historyClientId||!confirm('¿Restaurar esta configuración? Se publicará una nueva versión y se conservará la actual.'))return;
+    const r=await fetch(`/api/admin/clients/${historyClientId}/config/history/${historyId}/restore`,{method:'POST'});
+    if(!r.ok){alertMsg(await err(r),'danger');return}
+    const id=historyClientId;
+    historyModal.hide();
+    alertMsg('Configuración restaurada y publicada al cliente correctamente.');
+    await load();
+}
 function editConfig(id){const c=clients.find(x=>x.id===id);if(!c||!c.config)return;document.getElementById('configClientId').value=id;document.getElementById('x1').value=c.config.line.x1;document.getElementById('y1').value=c.config.line.y1;document.getElementById('x2').value=c.config.line.x2;document.getElementById('y2').value=c.config.line.y2;document.getElementById('inSide').value=c.config.in_side;document.getElementById('margin').value=c.config.margin;document.getElementById('confidence').value=Math.round(c.config.confidence*100);configModal.show()}
-document.getElementById('configForm').onsubmit=async e=>{e.preventDefault();const id=document.getElementById('configClientId').value;const p={line_x1:+x1.value,line_y1:+y1.value,line_x2:+x2.value,line_y2:+y2.value,in_side:+inSide.value,margin:+margin.value,confidence:+confidence.value};const r=await fetch(`/api/admin/clients/${id}/config`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)});if(!r.ok){alertMsg(await err(r),'danger');return}configModal.hide();alertMsg('Configuración publicada.');await load()};
+document.getElementById('configForm').onsubmit=async e=>{e.preventDefault();const id=document.getElementById('configClientId').value;const c=clients.find(x=>String(x.id)===String(id));const old=c&&c.config&&c.config.line;
+const p={line_x1:+x1.value,line_y1:+y1.value,line_x2:+x2.value,line_y2:+y2.value,in_side:+inSide.value,margin:+margin.value,confidence:+confidence.value};
+if(old&&old.points&&old.points.length>2&&old.x1===p.line_x1&&old.y1===p.line_y1&&old.x2===p.line_x2&&old.y2===p.line_y2){p.line_points=old.points;}const r=await fetch(`/api/admin/clients/${id}/config`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)});if(!r.ok){alertMsg(await err(r),'danger');return}configModal.hide();alertMsg('Configuración publicada.');await load()};
 async function rotate(id){if(!confirm('El token actual dejará de funcionar. ¿Continuar?'))return;const r=await fetch(`/api/admin/clients/${id}/rotate-token`,{method:'POST'});if(!r.ok){alertMsg(await err(r),'danger');return}showToken(await r.json())}
 async function toggle(id){const r=await fetch(`/api/admin/clients/${id}/toggle`,{method:'PATCH'});if(!r.ok){alertMsg(await err(r),'danger');return}await load()}
 load();setInterval(load,15000);
