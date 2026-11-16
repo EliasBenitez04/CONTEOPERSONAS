@@ -61,7 +61,7 @@ echo [SERVER] Entorno:    %ENVIRONMENT%
 echo.
 
 if /I "%ENVIRONMENT%"=="production" (
-    python -m uvicorn app.web:app --host 0.0.0.0 --port 8000 --workers 1
+    python -m app.serve
 ) else (
     python -m uvicorn app.web:app --host 0.0.0.0 --port 8000 --reload
 )
