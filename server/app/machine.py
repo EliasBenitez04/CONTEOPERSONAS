@@ -23,7 +23,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.config import settings
 from app.database import get_database
-from app.models import Branch, Camera, ClientConfig, ClientDevice
+from app.models import Branch, Camera, ClientConfig, ClientConfigHistory, ClientDevice
 
 
 router = APIRouter()
@@ -218,6 +218,115 @@ def _apply_config_values(config: ClientConfig, payload: ClientConfigPayload):
     config.updated_at = datetime.now(timezone.utc)
 
 
+def _snapshot_config(database: Session, config: ClientConfig, actor: str, action: str):
+    """Historiza una version de configuracion sin alterar su contenido."""
+    database.add(ClientConfigHistory(
+        client_device_id=config.client_device_id,
+        config_version=int(config.config_version or 0),
+        line_x1=config.line_x1,
+        line_y1=config.line_y1,
+        line_x2=config.line_x2,
+        line_y2=config.line_y2,
+        line_points=config.line_points,
+        in_side=config.in_side,
+        margin=config.margin,
+        confidence=config.confidence,
+        actor=actor[:100],
+        action=action
+    ))
+
+
+def _publish_config(database: Session, config: ClientConfig, payload: ClientConfigPayload,
+                    actor: str, action: str):
+    if int(config.config_version or 0) > 0:
+        _snapshot_config(database, config, actor, "anterior")
+    _apply_config_values(config, payload)
+    config.config_version = max(1, int(config.config_version or 0) + 1)
+    _snapshot_config(database, config, actor, action)
+
+
+def _history_dict(row: ClientConfigHistory):
+    return {
+        "id": row.id,
+        "config_version": row.config_version,
+        "created_at": row.created_at.isoformat() if row.created_at else None,
+        "actor": row.actor,
+        "action": row.action,
+        "line": {
+            "x1": row.line_x1, "y1": row.line_y1,
+            "x2": row.line_x2, "y2": row.line_y2,
+            "points": _normalize_line_points(
+                json.loads(row.line_points) if row.line_points else None,
+                row.line_x1, row.line_y1, row.line_x2, row.line_y2
+            )
+        },
+        "in_side": row.in_side,
+        "margin": row.margin,
+        "confidence": row.confidence
+    }
+
+
+def _admin_client(database: Session, client_id: int):
+    client = database.scalar(
+        select(ClientDevice)
+        .options(selectinload(ClientDevice.config))
+        .where(ClientDevice.id == client_id)
+    )
+    if client is None:
+        raise HTTPException(status_code=404, detail="Cliente no encontrado")
+    return client
+
+
+@router.get("/api/admin/clients/{client_id}/config/history")
+def admin_client_config_history(
+    client_id: int,
+    database: Session = Depends(get_database)
+):
+    client = _admin_client(database, client_id)
+    rows = database.scalars(
+        select(ClientConfigHistory)
+        .where(ClientConfigHistory.client_device_id == client.id)
+        .order_by(ClientConfigHistory.id.desc())
+        .limit(200)
+    ).all()
+    return [_history_dict(row) for row in rows]
+
+
+@router.post("/api/admin/clients/{client_id}/config/history/{history_id}/restore")
+def admin_restore_client_config(
+    client_id: int,
+    history_id: int,
+    request: Request,
+    database: Session = Depends(get_database)
+):
+    client = _admin_client(database, client_id)
+    if client.config is None:
+        raise HTTPException(status_code=404, detail="Configuracion no encontrada")
+    row = database.scalar(
+        select(ClientConfigHistory).where(
+            ClientConfigHistory.id == history_id,
+            ClientConfigHistory.client_device_id == client.id
+        )
+    )
+    if row is None:
+        raise HTTPException(status_code=404, detail="Version historica no encontrada")
+    actor = getattr(getattr(request.state, "user", None), "username", "administrador")
+    # Crear version nueva en vez de retroceder el numero de configuracion.
+    payload = ClientConfigPayload(
+        line_x1=row.line_x1, line_y1=row.line_y1,
+        line_x2=row.line_x2, line_y2=row.line_y2,
+        line_points=_normalize_line_points(
+            json.loads(row.line_points) if row.line_points else None,
+            row.line_x1, row.line_y1, row.line_x2, row.line_y2
+        ),
+        in_side=row.in_side, margin=row.margin, confidence=row.confidence
+    )
+    _publish_config(database, client.config, payload, actor, "restauracion")
+    database.commit()
+    return {"status": "ok", "config_version": client.config.config_version,
+            "restored_from": history_id}
+
+
 def client_to_dict(client: ClientDevice):
     config = client.config
     points = _stored_line_points(config) if config else None
@@ -383,6 +492,7 @@ def admin_create_client(
 def admin_update_client_config(
     client_id: int,
     payload: ClientConfigPayload,
+    request: Request,
     database: Session = Depends(get_database)
 ):
     client = database.scalar(
@@ -401,8 +511,8 @@ def admin_update_client_config(
         config = ClientConfig(client_device_id=client.id, config_version=0)
         database.add(config)
 
-    _apply_config_values(config, payload)
-    config.config_version = max(1, int(config.config_version or 0) + 1)
+    actor = getattr(getattr(request.state, "user", None), "username", "administrador")
+    _publish_config(database, config, payload, actor, "actualizacion")
     database.commit()
 
     return {
@@ -501,8 +611,7 @@ def client_update_config(
         )
         database.add(config)
 
-    _apply_config_values(config, payload)
-    config.config_version = max(1, int(config.config_version or 0) + 1)
+    _publish_config(database, config, payload, "cliente", "actualizacion")
     database.commit()
     database.refresh(config)
 
@@ -544,8 +653,7 @@ def bootstrap_client_config(
             detail="La configuracion central ya fue inicializada"
         )
 
-    _apply_config_values(config, payload)
-    config.config_version = 1
+    _publish_config(database, config, payload, "cliente", "inicial")
     database.commit()
     database.refresh(config)
 
