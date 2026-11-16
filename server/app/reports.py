@@ -298,7 +298,7 @@ def export_reports_csv(
     writer = csv.writer(output, delimiter=";")
     writer.writerow([
         "ID", "Fecha", "Hora", "Sucursal", "Camara",
-        "Tipo", "Valor", "Track ID", "UUID"
+        "Tipo", "Cantidad", "Track ID", "UUID"
     ])
 
     for event in events:
